@@ -1,12 +1,23 @@
--- 远程代码示例（需与本地变量名一致）
--- 1. 选中浅绿色按钮（替换本地默认的浅紫色）
-lightPurpleBtn.BorderSizePixel = 0 -- 取消原选中
+-- 远程代码优化版
+-- 1. 先关闭彩虹文本效果（避免文本颜色被覆盖）
+if rainbowConn and rainbowConn.Connected then
+    rainbowConn:Disconnect()
+end
+
+-- 2. 手动设置文本颜色为固定值（与浅绿色主题匹配，可选白色）
+titleBar.TextColor3 = Color3.fromRGB(255, 255, 255)
+for i = 1, #sectionLabels do
+    sectionLabels[i].TextColor3 = Color3.fromRGB(255, 255, 255)
+end
+minimizeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+
+-- 3. 按钮高亮和主题更新（保持不变）
+lightPurpleBtn.BorderSizePixel = 0
 lightGreenBtn.BorderSizePixel = 2
 lightGreenBtn.BorderColor3 = Color3.fromRGB(255, 255, 255)
--- 2. 应用浅绿色主题（替换本地默认的浅黑色）
 updateThemeColor(themes.lightGreen)
 
--- 3. 延迟同步移动速度分区颜色（逻辑与本地一致，可按需修改）
+-- 4. 同步速度分区颜色（保持不变）
 task.wait(0.1)
 if speedContent then
     local contentTheme = themes.lightGreen:lerp(Color3.fromRGB(255,255,255), 0.4)
@@ -20,7 +31,6 @@ if speedContent then
         end
     end
 end
-
 --[[
  lightPurple = Color3.fromRGB(180, 120, 255),  -- 浅紫色（默认）
 
