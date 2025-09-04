@@ -1,69 +1,58 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
-local AnimationService = game:GetService("AnimationService")
-local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
 
-local player = Players.LocalPlayer
-local character = player.Character or player.CharacterAdded:Wait()
-local humanoid = character:WaitForChild("Humanoid")
-
--- 创建动画
-local animation = Instance.new("Animation")
-animation.AnimationId = "rbxassetid://0"
-animation.Name = "RightArmWavingAnimation"
-
--- 获取右手骨骼
-local rightArm = character:WaitForChild("RightArm")
-
--- 定义动画关键帧数据
-local keyframes = {
-    -- 第0秒，右手初始位置
-    {Time = 0, Value = rightArm.CFrame},
-    -- 第0.5秒，右手抬高
-    {Time = 0.5, Value = rightArm.CFrame * CFrame.Angles(0, 0, -math.pi / 4)},
-    -- 第1秒，右手向一侧摆动
-    {Time = 1, Value = rightArm.CFrame * CFrame.Angles(0, math.pi / 8, -math.pi / 4)},
-    -- 第1.5秒，右手向另一侧摆动
-    {Time = 1.5, Value = rightArm.CFrame * CFrame.Angles(0, -math.pi / 8, -math.pi / 4)},
-    -- 第2秒，右手回到抬高位置
-    {Time = 2, Value = rightArm.CFrame * CFrame.Angles(0, 0, -math.pi / 4)},
-    -- 第2.5秒，右手回到初始位置
-    {Time = 2.5, Value = rightArm.CFrame}
-}
-
--- 将关键帧数据添加到动画轨道
-local animationTrack = animation:CreateTrack()
-for _, keyframe in ipairs(keyframes) do
-    local key = animationTrack:Insert(keyframe.Time, keyframe.Value)
-    key.Interpolation = Enum.AnimationKeyInterpolation.Linear
-end
-
--- 定义一个函数来播放动画
-local function playRightArmAnimation()
-    local track = humanoid:LoadAnimation(animation)
-    track:Play()
-end
-
--- 处理输入
-local inputConnection
-if UserInputService.TouchEnabled then
-    inputConnection = UserInputService.TouchTap:Connect(playRightArmAnimation)
-else
-    inputConnection = UserInputService.InputBegan:Connect(function(input)
-        if input.KeyCode == Enum.KeyCode.Y then
-            playRightArmAnimation()
+local function waveRightHand(character)
+    local rightArm = character:FindFirstChild("RightUpperArm") or character:FindFirstChild("Right Arm")
+    local rightShoulder = nil
+    -- R15和R6兼容
+    if rightArm then
+        for i, v in rightArm:GetChildren() do
+            if v:IsA("Motor6D") and v.Name == "RightShoulder" then
+                rightShoulder = v
+                break
+            end
         end
-    end)
-end
-
--- 清理连接（如果需要在脚本结束时清理）
-local function cleanup()
-    if inputConnection then
-        inputConnection:Disconnect()
+        if not rightShoulder and character:FindFirstChild("Torso") then
+            rightShoulder = character.Torso:FindFirstChild("Right Shoulder")
+        end
     end
+    if not rightShoulder then return end
+
+    local waving = true
+    local angle = 0
+    local amplitude = math.rad(60)
+    local speed = 3
+
+    -- 抬高右手
+    rightShoulder.C0 = rightShoulder.C0 * CFrame.Angles(0, 0, math.rad(-60))
+
+    -- 动画循环
+    while waving and character.Parent do
+        angle = angle + speed * math.pi * 0.03
+        local swing = math.sin(angle) * amplitude
+        rightShoulder.C0 = rightShoulder.C0 * CFrame.Angles(0, swing, 0)
+        task.wait(0.03)
+        -- 检查是否停止
+        if not character:GetAttribute("RightHandWaving") then
+            break
+        end
+    end
+    -- 还原
+    rightShoulder.C0 = rightShoulder.C0
 end
 
--- 如果有合适的清理时机（例如脚本被移除时），调用cleanup函数
--- 这里假设在脚本所在的实例被移除时调用
-local script = script or script.Parent
-script.Parent = nil
-cleanup()
+local function stopWave(character)
+    character:SetAttribute("RightHandWaving", false)
+end
+
+ReplicatedStorage:WaitForChild("ToggleRightHandWave").OnServerEvent:Connect(function(player, waving)
+    local character = player.Character
+    if not character then return end
+    if waving then
+        character:SetAttribute("RightHandWaving", true)
+        waveRightHand(character)
+    else
+        stopWave(character)
+    end
+end)
