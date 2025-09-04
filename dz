@@ -2,7 +2,11 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 
+-- 全局开关变量
+local waveRightHandEnabled = true
+
 local function waveRightHand(character)
+    if not waveRightHandEnabled then return end
     local rightArm = character:FindFirstChild("RightUpperArm") or character:FindFirstChild("Right Arm")
     local rightShoulder = nil
     -- R15和R6兼容
@@ -29,6 +33,7 @@ local function waveRightHand(character)
 
     -- 动画循环
     while waving and character.Parent do
+        if not waveRightHandEnabled then break end
         angle = angle + speed * math.pi * 0.03
         local swing = math.sin(angle) * amplitude
         rightShoulder.C0 = rightShoulder.C0 * CFrame.Angles(0, swing, 0)
@@ -47,6 +52,7 @@ local function stopWave(character)
 end
 
 ReplicatedStorage:WaitForChild("ToggleRightHandWave").OnServerEvent:Connect(function(player, waving)
+    if not waveRightHandEnabled then return end
     local character = player.Character
     if not character then return end
     if waving then
