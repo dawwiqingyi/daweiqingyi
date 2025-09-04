@@ -1,39 +1,99 @@
--- 这部分是你要放在外部链接中的代码
 local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")  -- 替换错误的AnimationService
+local UserInputService = game:GetService("UserInputService")
+
 local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local humanoid = character:WaitForChild("Humanoid")
-local animator = humanoid:WaitForChild("Animator")
 
--- 获取右手部件
-local rightArm = character:FindFirstChild("RightArm") or character:FindFirstChild("Right Upper Arm")
+-- 适配R6和R15角色的右手部件
+local function getRightArm(character)
+    -- 优先找R15部件，再找R6部件
+    return character:FindFirstChild("RightUpperArm") 
+        or character:FindFirstChild("RightArm")
+end
+
+local rightArm = getRightArm(character)
 if not rightArm then
-    warn("未找到右手部件")
+    warn("未找到右手部件，动画无法播放")
     return
 end
 
+-- 存储初始CFrame（避免角色移动后动画错位）
 local originalCFrame = rightArm.CFrame
 
--- 创建并加载动画
-local animation = Instance.new("Animation")
-animation.Name = "RightArmWavingAnimation"
+-- 定义动画关键帧（使用Tween实现，替代错误的AnimationTrack）
+local tweenInfo = TweenInfo.new(
+    0.5,  -- 每个关键帧的过渡时间
+    Enum.EasingStyle.Sine,
+    Enum.EasingDirection.InOut
+)
 
--- 动画数据
-local animationData = {
-    ["RightArm"] = {
-        Type = "CFrame",
-        Keyframes = {
-            [0] = originalCFrame,
-            [0.5] = originalCFrame * CFrame.Angles(0, 0, -math.pi / 4),
-            [1] = originalCFrame * CFrame.Angles(0, math.pi / 8, -math.pi / 4),
-            [1.5] = originalCFrame * CFrame.Angles(0, -math.pi / 8, -math.pi / 4),
-            [2] = originalCFrame * CFrame.Angles(0, 0, -math.pi / 4),
-            [2.5] = originalCFrame
-        }
-    }
+-- 动画序列：按顺序播放不同角度的摆动
+local animations = {
+    rightArm.CFrame * CFrame.Angles(0, 0, -math.pi / 4),  -- 抬高
+    rightArm.CFrame * CFrame.Angles(0, math.pi / 8, -math.pi / 4),  -- 右摆
+    rightArm.CFrame * CFrame.Angles(0, -math.pi / 8, -math.pi / 4),  -- 左摆
+    rightArm.CFrame * CFrame.Angles(0, 0, -math.pi / 4),  -- 回中
+    originalCFrame  -- 复位
 }
 
--- 播放动画
-local track = animator:LoadAnimation(animation)
-track:Play()
-return track -- 返回轨道以便控制
+-- 播放动画序列
+local function playRightArmAnimation()
+    -- 角色移动后更新初始位置
+    originalCFrame = rightArm.CFrame
+    
+    -- 按顺序播放每个动画阶段
+    task.spawn(function()
+        for _, targetCFrame in ipairs(animations) do
+            local tween = TweenService:Create(rightArm, tweenInfo, {CFrame = targetCFrame})
+            tween:Play()
+            tween.Completed:Wait()  -- 等待当前动画完成再播放下一个
+        end
+    end)
+end
+
+-- 处理输入（优化触屏体验）
+local inputConnection
+
+if UserInputService.TouchEnabled then
+    -- 手机端：只响应双击或特定区域点击（避免误触）
+    local lastTapTime = 0
+    inputConnection = UserInputService.TouchTap:Connect(function(_, tapCount)
+        -- 双击触发（间隔小于0.3秒）
+        if tapCount == 2 then
+            playRightArmAnimation()
+        end
+    end)
+else
+    -- PC端：Y键触发
+    inputConnection = UserInputService.InputBegan:Connect(function(input)
+        if input.KeyCode == Enum.KeyCode.Y then
+            playRightArmAnimation()
+        end
+    end)
+end
+
+-- 角色重生时重新获取部件
+player.CharacterAdded:Connect(function(newCharacter)
+    character = newCharacter
+    humanoid = character:WaitForChild("Humanoid")
+    rightArm = getRightArm(character)
+    if rightArm then
+        originalCFrame = rightArm.CFrame
+    end
+end)
+
+-- 清理函数
+local function cleanup()
+    if inputConnection and inputConnection.Connected then
+        inputConnection:Disconnect()
+    end
+end
+
+-- 脚本销毁时清理
+script.AncestryChanged:Connect(function(_, newParent)
+    if not newParent then
+        cleanup()
+    end
+end)
