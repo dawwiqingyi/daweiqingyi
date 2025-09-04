@@ -6,6 +6,14 @@ local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local humanoid = character:WaitForChild("Humanoid")
 
+-- 远程脚本中获取骨骼的部分需要修改
+local function getBone(character, r15Name, r6Name)
+    return character:FindFirstChild(r15Name) or character:FindFirstChild(r6Name)
+end
+
+local rightArm = getBone(character, "RightUpperArm", "RightArm")
+local upperTorso = getBone(character, "UpperTorso", "Torso")  -- 其他骨骼同理
+
 -- 适配R6和R15角色的右手部件
 local function getRightArm(character)
     -- 优先找R15部件，再找R6部件
