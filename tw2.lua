@@ -1,8 +1,6 @@
-@@ -1,17 +1,35 @@
-
 local TailParticleManager = {}
 
--- 粒子配置，可自行替换贴图/颜色
+-- 粒子配置（双颜色：蓝色+粉色）
 local PARTICLES = {
     {
         Name = "TailParticleBlue",
@@ -20,7 +18,7 @@ local PARTICLES = {
     },
     {
         Name = "TailParticlePink",
-        Texture = "rbxassetid://48771414", -- 粉色粒子贴图，可换自己喜欢的
+        Texture = "rbxassetid://48771414", -- 粉色粒子贴图
         Color = ColorSequence.new(Color3.fromRGB(255, 0, 200), Color3.fromRGB(255, 120, 255)),
         Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.6), NumberSequenceKeypoint.new(1, 0)}),
         Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.2), NumberSequenceKeypoint.new(1, 1)}),
@@ -32,29 +30,14 @@ local PARTICLES = {
         LightEmission = 0.8,
         ZOffset = -0.4
     }
-local PARTICLE_NAME = "TailParticle"
-local PARTICLE_PROPERTIES = {
-    Texture = "rbxassetid://243098098", -- 可替换为你喜欢的粒子贴图
-    Color = ColorSequence.new(Color3.fromRGB(0, 255, 255), Color3.fromRGB(255, 0, 255)),
-    Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.5), NumberSequenceKeypoint.new(1, 0)}),
-    Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.2), NumberSequenceKeypoint.new(1, 1)}),
-    Lifetime = NumberRange.new(0.5, 1.2),
-    Rate = 40,
-    Speed = NumberRange.new(2, 4),
-    Rotation = NumberRange.new(0, 360),
-    SpreadAngle = Vector2.new(10, 10),
-    LightEmission = 0.7,
 }
 
+-- 添加粒子（核心方法）
 function TailParticleManager:AddParticle(character)
-@@ -18,13 +36,25 @@
-
     local hrp = character:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
-    if hrp:FindFirstChild(PARTICLE_NAME) then return end
-
-    -- 添加两种颜色粒子
-    for i, config in PARTICLES do
+    -- 避免重复创建粒子
+    for _, config in ipairs(PARTICLES) do
         if not hrp:FindFirstChild(config.Name) then
             local emitter = Instance.new("ParticleEmitter")
             emitter.Name = config.Name
@@ -71,28 +54,17 @@ function TailParticleManager:AddParticle(character)
             emitter.ZOffset = config.ZOffset
             emitter.Parent = hrp
         end
-    local emitter = Instance.new("ParticleEmitter")
-    emitter.Name = PARTICLE_NAME
-    for k, v in PARTICLE_PROPERTIES do
-        emitter[k] = v
     end
-    emitter.Parent = hrp
 end
 
+-- 移除粒子（核心方法）
 function TailParticleManager:RemoveParticle(character)
-@@ -31,8 +61,10 @@
-
     local hrp = character:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
-    for i, config in PARTICLES do
+    for _, config in ipairs(PARTICLES) do
         local emitter = hrp:FindFirstChild(config.Name)
-        if emitter then
-            emitter:Destroy()
-        end
-    local emitter = hrp:FindFirstChild(PARTICLE_NAME)
-    if emitter then
-        emitter:Destroy()
+        if emitter then emitter:Destroy() end
     end
 end
 
-
+return TailParticleManager
