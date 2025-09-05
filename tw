@@ -53,7 +53,7 @@ local function createTrailPart(position, color, scale)
         NumberSequenceKeypoint.new(0, 0.3 * scale), 
         NumberSequenceKeypoint.new(1, 0)
     }
-    particles.Lifetime = NumberRange.new(0.5, 1.0)
+    particles.Lifetime = NumberRange.new(0.5, 2)
     particles.Rate = 40 * scale -- 速率稍降，避免粒子过于密集
     particles.SpreadAngle = Vector2.new(45, 45)
     particles.Speed = NumberRange.new(4 * scale, 8 * scale) -- 速度稍降，更显柔和
