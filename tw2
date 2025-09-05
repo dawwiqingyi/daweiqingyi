@@ -1,207 +1,154 @@
--- 修复后的 SmokeFireEffect.lua（远程脚本）
+-- 远程粒子核心逻辑：负责粒子生成、移除、移动检测
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
-
--- 从主代码全局环境获取依赖（关键：确保变量同步）
 local LocalPlayer = Players.LocalPlayer
+local RunService = game:GetService("RunService")
+
+-- 从本地环境获取关键变量（本地脚本需提前定义这些全局变量）
 local getgenv = getgenv()
-local statusText = getgenv().statusText -- 主代码的状态文本
-local cleanupList = getgenv().cleanupList -- 主代码的清理列表
+local particleEnabled = getgenv().particleEnabled -- 本地开关状态
+local particleEmitters = getgenv().particleEmitters -- 本地粒子实例列表
+local toggleButtonTextUpdate = getgenv().toggleButtonTextUpdate -- 本地按钮文本更新函数
 
--- 初始化变量
-local smokeFireInstances = {} -- 存储所有粒子/部件实例
-local smokeFireConnection = nil -- 帧监听连接
-local smokeFireCharacter = LocalPlayer.Character -- 初始角色
-local lastRootPosition = nil -- 上一帧角色位置（用于跟随判断）
+-- 1. 创建烟雾和紫色烟雾火焰粒子（贴近身体小浅、远离大深）
+local function createParticleEmitters(character)
+    local root = character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
 
--- 颜色配置（不变）
-local fireColors = {
-    Color3.fromRGB(255, 165, 0),
-    Color3.fromRGB(255, 69, 0),
-    Color3.fromRGB(255, 0, 0),
-    Color3.fromRGB(139, 0, 0)
-}
-local smokeColors = {
-    Color3.fromRGB(200, 200, 200),
-    Color3.fromRGB(150, 150, 150),
-    Color3.fromRGB(100, 100, 100),
-    Color3.fromRGB(50, 50, 50)
-}
-
--- 1. 清理所有粒子实例（优化：确保彻底清理）
-local function clearSmokeFire()
-    -- 销毁所有实例
-    for _, instance in ipairs(smokeFireInstances) do
-        if instance and instance.Parent then
-            instance:Destroy()
+    -- 清理旧粒子（避免重复）
+    for _, emitter in ipairs(particleEmitters) do
+        if emitter and emitter.Parent then
+            emitter:Destroy()
         end
     end
-    smokeFireInstances = {} -- 清空列表
-    
-    -- 断开帧监听
-    if smokeFireConnection and smokeFireConnection.Connected then
-        smokeFireConnection:Disconnect()
-        smokeFireConnection = nil
-    end
-    
-    lastRootPosition = nil -- 重置上一帧位置
+    particleEmitters = {}
+
+    -- 烟雾粒子
+    local smoke = Instance.new("ParticleEmitter")
+    smoke.Name = "SmokeTrail"
+    smoke.Texture = "rbxasset://textures/particles/smoke_main.dds"
+    smoke.Color = ColorSequence.new(Color3.fromRGB(80,80,80), Color3.fromRGB(180,180,180))
+    smoke.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 2)})
+    smoke.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.5), NumberSequenceKeypoint.new(1, 1)})
+    smoke.Lifetime = NumberRange.new(0.6, 1.2)
+    smoke.Rate = 30
+    smoke.Speed = NumberRange.new(2, 4)
+    smoke.Rotation = NumberRange.new(0, 360)
+    smoke.Enabled = particleEnabled
+    smoke.Parent = root
+    table.insert(particleEmitters, smoke)
+
+    -- 紫色烟雾火焰粒子（核心视觉效果）
+    local fire = Instance.new("ParticleEmitter")
+    fire.Name = "FireTrail"
+    fire.Texture = "rbxassetid://258128463" -- 官方烟雾贴图
+    fire.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(180, 120, 255)),   -- 贴近：浅紫
+        ColorSequenceKeypoint.new(0.15, Color3.fromRGB(140, 60, 200)), -- 渐深
+        ColorSequenceKeypoint.new(0.4, Color3.fromRGB(100, 30, 140)),  -- 中间：中紫
+        ColorSequenceKeypoint.new(0.7, Color3.fromRGB(60, 0, 80)),     -- 远离：深紫
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(20, 0, 30))        -- 尾部：黑紫
+    })
+    fire.Size = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0.7),      -- 贴近：小
+        NumberSequenceKeypoint.new(0.15, 1.2),   -- 渐大
+        NumberSequenceKeypoint.new(0.4, 2.2),    -- 中间
+        NumberSequenceKeypoint.new(0.7, 3.5),    -- 远离：大
+        NumberSequenceKeypoint.new(1, 5.5)       -- 尾部：最大
+    })
+    fire.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0.05),     -- 中心：亮
+        NumberSequenceKeypoint.new(0.2, 0.18),   -- 渐隐
+        NumberSequenceKeypoint.new(0.6, 0.6),    -- 尾部：虚化
+        NumberSequenceKeypoint.new(1, 1)         -- 完全透明
+    })
+    fire.Lifetime = NumberRange.new(1.2, 2.2)
+    fire.Rate = 60
+    fire.Speed = NumberRange.new(3, 7)
+    fire.Rotation = NumberRange.new(0, 360)
+    fire.Enabled = particleEnabled
+    fire.LightEmission = 0.12 -- 低光照，更像烟雾
+    fire.Parent = root
+    table.insert(particleEmitters, fire)
+
+    -- 更新本地粒子列表（同步到本地环境）
+    getgenv().particleEmitters = particleEmitters
 end
 
--- 2. 创建单个粒子部件（不变）
-local function createSmokeFirePart(position, scale, isFire)
-    local part = Instance.new("Part")
-    part.Name = isFire and ("FirePart_" .. LocalPlayer.Name) or ("SmokePart_" .. LocalPlayer.Name)
-    part.Size = Vector3.new(3, 3, 3) * scale
-    part.Material = Enum.Material.Neon
-    part.Color = isFire and fireColors[1] or smokeColors[1]
-    part.Anchored = true
-    part.CanCollide = false
-    part.Shape = Enum.PartType.Ball
-    part.Position = position
-    part.Transparency = 0.3
-    part.Parent = workspace
-
-    -- 火焰发光效果
-    if isFire then
-        local pointLight = Instance.new("PointLight")
-        pointLight.Color = fireColors[1]
-        pointLight.Brightness = 3
-        pointLight.Range = 15 * scale
-        pointLight.Parent = part
-        table.insert(smokeFireInstances, pointLight)
-    end
-
-    -- 粒子发射器
-    local attachment = Instance.new("Attachment")
-    attachment.Parent = part
-    local particles = Instance.new("ParticleEmitter")
-    particles.Parent = attachment
-
-    -- 粒子属性配置
-    if isFire then
-        particles.Color = ColorSequence.new(fireColors)
-        particles.Size = NumberSequence.new({
-            NumberSequenceKeypoint.new(0, 0.8 * scale),
-            NumberSequenceKeypoint.new(1, 0.2 * scale)
-        })
-        particles.Lifetime = NumberRange.new(0.3, 0.7)
-        particles.Rate = 80 * scale
-        particles.Speed = NumberRange.new(5 * scale, 10 * scale)
-        particles.Gravity = -15 * scale
-        particles.Drag = 2 * scale
-        particles.Heat = 5
-        particles.Texture = "rbxassetid://1316045960"
-    else
-        particles.Color = ColorSequence.new(smokeColors)
-        particles.Size = NumberSequence.new({
-            NumberSequenceKeypoint.new(0, 0.5 * scale),
-            NumberSequenceKeypoint.new(1, 2 * scale)
-        })
-        particles.Lifetime = NumberRange.new(1.5, 3)
-        particles.Rate = 40 * scale
-        particles.Speed = NumberRange.new(2 * scale, 5 * scale)
-        particles.Gravity = -5 * scale
-        particles.Drag = 5 * scale
-        particles.Transparency = NumberSequence.new({
-            NumberSequenceKeypoint.new(0, 0.2),
-            NumberSequenceKeypoint.new(1, 1)
-        })
-        particles.Texture = "rbxassetid://1315969570"
-    end
-
-    particles.SpreadAngle = Vector2.new(30, 30)
-    particles.EmissionDirection = Enum.NormalId.Top
-    table.insert(smokeFireInstances, part)
-    table.insert(smokeFireInstances, particles)
-
-    -- 粒子自动销毁（避免残留）
-    task.delay(isFire and 1 or 3, function()
-        if part and part.Parent then part:Destroy() end
-    end)
-
-    return part
-end
-
--- 3. 核心跟随逻辑（重点优化）
-local function startSmokeFire()
-    clearSmokeFire() -- 先清理旧实例
-    
-    -- 等待角色加载（修复：确保获取到最新角色）
-    smokeFireCharacter = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-    local rootPart = smokeFireCharacter:WaitForChild("HumanoidRootPart", 5)
-    if not rootPart then
-        warn("❌ 烟雾火焰：未找到角色根部件")
-        if statusText then
-            statusText.Text = statusText.Text:gsub("\n烟雾火焰状态: [^\n]+", "")
-            statusText.Text = statusText.Text .. "\n烟雾火焰状态: 角色加载失败"
+-- 2. 移除所有粒子
+local function removeParticleEmitters(character)
+    local root = character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    for _, emitter in ipairs(particleEmitters) do
+        if emitter and emitter.Parent == root then
+            emitter:Destroy()
         end
-        return
     end
-    lastRootPosition = rootPart.Position -- 初始化上一帧位置
+    particleEmitters = {}
+    getgenv().particleEmitters = particleEmitters -- 同步到本地
+end
 
-    -- 每帧更新粒子（优化：降低移动阈值，提高跟随流畅度）
-    smokeFireConnection = RunService.RenderStepped:Connect(function()
-        -- 实时检查角色状态（修复：角色消失/死亡时停止）
-        if not smokeFireCharacter or not smokeFireCharacter.Parent or 
-           not smokeFireCharacter:FindFirstChild("HumanoidRootPart") or
-           (smokeFireCharacter:FindFirstChild("Humanoid") and smokeFireCharacter.Humanoid.Health <= 0) then
-            stopSmokeFire()
+-- 3. 移动检测：静止时不产生粒子（本地调用此函数启动循环）
+local function startMovementDetection()
+    local movementThreshold = 1.5 -- 速度阈值，可根据需求调整
+    RunService.RenderStepped:Connect(function()
+        local character = LocalPlayer.Character
+        if not character or not particleEnabled or #particleEmitters == 0 then
             return
         end
+        local root = character:FindFirstChild("HumanoidRootPart")
+        if not root then return end
 
-        local currentRoot = smokeFireCharacter.HumanoidRootPart
-        local currentPosition = currentRoot.Position
-        local charScale = math.max(currentRoot.Size.X / 2, 0.5) -- 角色缩放（避免过小）
-
-        -- 优化：降低移动阈值（0.1*charScale），缓慢移动也生成粒子
-        local moveThreshold = 0.1 * charScale
-        local distance = (currentPosition - lastRootPosition).Magnitude
-
-        -- 生成粒子（跟随逻辑）
-        if distance >= moveThreshold or not lastRootPosition then
-            -- 火焰在角色位置，烟雾在角色上方（视觉更自然）
-            createSmokeFirePart(currentPosition, charScale, true) -- 火焰
-            createSmokeFirePart(currentPosition + Vector3.new(0, 1, 0), charScale, false) -- 烟雾
-            lastRootPosition = currentPosition -- 更新上一帧位置
+        -- 根据角色速度控制粒子启用/禁用
+        local speed = root.Velocity.Magnitude
+        local shouldEnable = speed > movementThreshold
+        for _, emitter in ipairs(particleEmitters) do
+            if emitter then
+                emitter.Enabled = shouldEnable
+            end
         end
     end)
+end
 
-    -- 加入主代码的清理列表（确保UI销毁时同步清理）
-    if cleanupList and cleanupList.connections then
-        table.insert(cleanupList.connections, smokeFireConnection)
+-- 4. 角色加载/重生时自动创建粒子
+local function onCharacterAdded(character)
+    if particleEnabled then
+        -- 等待根部件加载（避免角色未初始化完成）
+        character:WaitForChild("HumanoidRootPart", 5)
+        createParticleEmitters(character)
     end
 end
 
--- 4. 停止逻辑（不变）
-local function stopSmokeFire()
-    clearSmokeFire()
-    if statusText then
-        statusText.Text = statusText.Text:gsub("\n烟雾火焰状态: [^\n]+", "")
+-- 5. 监听本地开关状态变化（本地切换时触发）
+local function listenToLocalToggle()
+    while true do
+        task.wait(0.1)
+        local newEnabled = getgenv().particleEnabled
+        if newEnabled ~= particleEnabled then
+            particleEnabled = newEnabled
+            local character = LocalPlayer.Character
+            if character then
+                if particleEnabled then
+                    createParticleEmitters(character)
+                else
+                    removeParticleEmitters(character)
+                end
+                -- 调用本地函数更新按钮文本（避免远程直接操作本地UI）
+                if toggleButtonTextUpdate then
+                    toggleButtonTextUpdate(particleEnabled)
+                end
+            end
+        end
     end
-    print("❌ 烟雾火焰已关闭")
 end
 
--- 5. 角色重生适配（修复：确保重生后重新跟随）
-local function onCharacterAdded(newChar)
-    smokeFireCharacter = newChar
-    -- 等待根部件加载（延迟0.5秒，避免加载不及时）
-    task.wait(0.5)
-    -- 只有开启状态下才重新启动（同步主代码开关）
-    if getgenv().isSmokeFireEnabled then
-        startSmokeFire()
-        print("✅ 烟雾火焰：角色重生，恢复跟随")
-    end
-end
-
--- 绑定角色重生事件（修复：确保首次加载和重生都生效）
+-- 6. 初始化：绑定角色事件+启动检测
 if LocalPlayer.Character then
     onCharacterAdded(LocalPlayer.Character)
 end
 LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
+startMovementDetection()
+task.spawn(listenToLocalToggle)
 
--- 暴露函数到主代码全局环境
-getgenv().startSmokeFire = startSmokeFire
-getgenv().stopSmokeFire = stopSmokeFire
-getgenv().clearSmokeFire = clearSmokeFire
-getgenv().smokeFireInstances = smokeFireInstances -- 暴露实例列表，供主代码清理
+-- 暴露核心函数到本地环境（本地可调用）
+getgenv().createParticleEmitters = createParticleEmitters
+getgenv().removeParticleEmitters = removeParticleEmitters
