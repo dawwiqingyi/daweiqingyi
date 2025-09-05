@@ -91,7 +91,7 @@ local function startTrail()
         rawCharScale = rawCharScale < 0.1 and 1 or rawCharScale
 
         -- 步骤2：给缩放加固定上限（关键！避免粒子过大，可调整maxScale值）
-        local maxScale = 3 -- 粒子最大放大倍数（角色再大，粒子也只按3倍放大）
+        local maxScale = 5 -- 粒子最大放大倍数（角色再大，粒子也只按3倍放大）
         local charScale = math.min(rawCharScale, maxScale)
 
         -- （可选）若想换方案二“根号缩放”，删除步骤2，改用下面这行：
