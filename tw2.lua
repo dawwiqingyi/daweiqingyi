@@ -1,170 +1,98 @@
--- 彩虹拖尾客户端核心逻辑（无UI，依赖原脚本的清理列表）
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
+@@ -1,17 +1,35 @@
 
--- 初始化变量（兼容原脚本的全局清理列表 cleanupList）
-local player = Players.LocalPlayer
-local isTrailActive = false
-local trailParts = {}
-local trailConnection = nil
-local colorIndex = 0
+local TailParticleManager = {}
 
--- 彩虹颜色数组
-local rainbowColors = {
-    Color3.fromRGB(255, 0, 0),
-    Color3.fromRGB(255, 127, 0),
-    Color3.fromRGB(255, 255, 0),
-    Color3.fromRGB(0, 255, 0),
-    Color3.fromRGB(0, 0, 255),
-    Color3.fromRGB(75, 0, 130),
-    Color3.fromRGB(148, 0, 211)
+-- 粒子配置，可自行替换贴图/颜色
+local PARTICLES = {
+    {
+        Name = "TailParticleBlue",
+        Texture = "rbxassetid://243098098", -- 蓝色粒子贴图
+        Color = ColorSequence.new(Color3.fromRGB(0, 200, 255), Color3.fromRGB(0, 60, 255)),
+        Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.7), NumberSequenceKeypoint.new(1, 0)}),
+        Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.1), NumberSequenceKeypoint.new(1, 1)}),
+        Lifetime = NumberRange.new(0.8, 1.5),
+        Rate = 35,
+        Speed = NumberRange.new(2, 4),
+        Rotation = NumberRange.new(0, 360),
+        SpreadAngle = Vector2.new(20, 10),
+        LightEmission = 0.7,
+        ZOffset = -0.3
+    },
+    {
+        Name = "TailParticlePink",
+        Texture = "rbxassetid://48771414", -- 粉色粒子贴图，可换自己喜欢的
+        Color = ColorSequence.new(Color3.fromRGB(255, 0, 200), Color3.fromRGB(255, 120, 255)),
+        Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.6), NumberSequenceKeypoint.new(1, 0)}),
+        Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.2), NumberSequenceKeypoint.new(1, 1)}),
+        Lifetime = NumberRange.new(0.7, 1.2),
+        Rate = 30,
+        Speed = NumberRange.new(2, 4),
+        Rotation = NumberRange.new(0, 360),
+        SpreadAngle = Vector2.new(15, 15),
+        LightEmission = 0.8,
+        ZOffset = -0.4
+    }
+local PARTICLE_NAME = "TailParticle"
+local PARTICLE_PROPERTIES = {
+    Texture = "rbxassetid://243098098", -- 可替换为你喜欢的粒子贴图
+    Color = ColorSequence.new(Color3.fromRGB(0, 255, 255), Color3.fromRGB(255, 0, 255)),
+    Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.5), NumberSequenceKeypoint.new(1, 0)}),
+    Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.2), NumberSequenceKeypoint.new(1, 1)}),
+    Lifetime = NumberRange.new(0.5, 1.2),
+    Rate = 40,
+    Speed = NumberRange.new(2, 4),
+    Rotation = NumberRange.new(0, 360),
+    SpreadAngle = Vector2.new(10, 10),
+    LightEmission = 0.7,
 }
 
--- 1. 创建拖尾部件
-local function createTrailPart(position, color)
-    local part = Instance.new("Part")
-    part.Name = "RainbowTrail_".. player.Name
-    part.Size = Vector3.new(2, 2, 2)
-    part.Material = Enum.Material.Neon
-    part.Color = color
-    part.Anchored = true
-    part.CanCollide = false
-    part.Shape = Enum.PartType.Ball
-    part.Position = position
-    part.Parent = workspace
+function TailParticleManager:AddParticle(character)
+@@ -18,13 +36,25 @@
 
-    -- 发光效果
-    local pointLight = Instance.new("PointLight")
-    pointLight.Color = color
-    pointLight.Brightness = 2
-    pointLight.Range = 10
-    pointLight.Parent = part
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    if hrp:FindFirstChild(PARTICLE_NAME) then return end
 
-    -- 粒子效果修改为烟雾飘散效果
-    local attachment = Instance.new("Attachment")
-    attachment.Parent = part
-    local particles = Instance.new("ParticleEmitter")
-    particles.Parent = attachment
-    particles.Color = ColorSequence.new(Color3.fromRGB(200, 200, 200)) -- 烟雾颜色
-    particles.Size = NumberSequence.new{NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 3)} -- 粒子大小从1到3
-    particles.Lifetime = NumberRange.new(2, 3) -- 粒子存活时间2到3秒
-    particles.Rate = 20 -- 每秒发射20个粒子
-    particles.SpreadAngle = Vector2.new(180, 180) -- 全方位扩散
-    particles.Speed = NumberRange.new(1, 2) -- 粒子速度1到2
-    particles.Gravity = Vector3.new(0, -5, 0) -- 模拟向下的重力，类似烟雾下沉
-    particles.Rotation = NumberRange.new(0, 360) -- 粒子随机旋转
-
-    return part
-end
-
--- 2. 清理拖尾
-local function clearTrail()
-    for _, part in ipairs(trailParts) do
-        if part and part.Parent then
-            part.Parent = nil
+    -- 添加两种颜色粒子
+    for i, config in PARTICLES do
+        if not hrp:FindFirstChild(config.Name) then
+            local emitter = Instance.new("ParticleEmitter")
+            emitter.Name = config.Name
+            emitter.Texture = config.Texture
+            emitter.Color = config.Color
+            emitter.Size = config.Size
+            emitter.Transparency = config.Transparency
+            emitter.Lifetime = config.Lifetime
+            emitter.Rate = config.Rate
+            emitter.Speed = config.Speed
+            emitter.Rotation = config.Rotation
+            emitter.SpreadAngle = config.SpreadAngle
+            emitter.LightEmission = config.LightEmission
+            emitter.ZOffset = config.ZOffset
+            emitter.Parent = hrp
         end
+    local emitter = Instance.new("ParticleEmitter")
+    emitter.Name = PARTICLE_NAME
+    for k, v in PARTICLE_PROPERTIES do
+        emitter[k] = v
     end
-    trailParts = {}
+    emitter.Parent = hrp
 end
 
--- 3. 开始拖尾
-local function startTrail()
-    -- 避免重复开启
-    if trailConnection then return end
-    -- 检查角色是否加载
-    local character = player.Character or player.CharacterAdded:Wait()
-    local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
-    local lastPosition = humanoidRootPart.Position
+function TailParticleManager:RemoveParticle(character)
+@@ -31,8 +61,10 @@
 
-    -- 每帧更新拖尾（绑定到 RenderStepped，与画面同步）
-    trailConnection = RunService.RenderStepped:Connect(function()
-        if not character or not character:FindFirstChild("HumanoidRootPart") then
-            stopTrail()
-            return
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    for i, config in PARTICLES do
+        local emitter = hrp:FindFirstChild(config.Name)
+        if emitter then
+            emitter:Destroy()
         end
-        local currentPosition = humanoidRootPart.Position
-        local distance = (currentPosition - lastPosition).Magnitude
-
-        -- 移动时才生成拖尾
-        if distance > 0.5 then
-            colorIndex = (colorIndex % #rainbowColors) + 1
-            local trailPart = createTrailPart(lastPosition, rainbowColors[colorIndex])
-            table.insert(trailParts, trailPart)
-
-            -- 消失动画
-            local tween = TweenService:Create(trailPart, TweenInfo.new(2, Enum.EasingStyle.Quad), {
-                Transparency = 1,
-                Size = Vector3.new(0.1, 0.1, 0.1)
-            })
-            tween:Play()
-            tween.Completed:Connect(function()
-                if trailPart and trailPart.Parent then
-                    trailPart.Parent = nil
-                end
-                -- 从数组移除
-                for i, p in ipairs(trailParts) do
-                    if p == trailPart then
-                        table.remove(trailParts, i)
-                        break
-                    end
-                end
-            end)
-
-            lastPosition = currentPosition
-        end
-    end)
-
-    -- 将连接加入原脚本的清理列表（UI销毁时自动停止拖尾）
-    if getgenv().cleanupList and getgenv().cleanupList.connections then
-        table.insert(getgenv().cleanupList.connections, trailConnection)
+    local emitter = hrp:FindFirstChild(PARTICLE_NAME)
+    if emitter then
+        emitter:Destroy()
     end
 end
 
--- 4. 停止拖尾
-local function stopTrail()
-    if trailConnection and trailConnection.Connected then
-        trailConnection:Disconnect()
-        trailConnection = nil
-    end
-    -- 快速清理现有拖尾
-    for _, part in ipairs(trailParts) do
-        if part and part.Parent then
-            TweenService:Create(part, TweenInfo.new(0.5), {
-                Transparency = 1,
-                Size = Vector3.new(0.1, 0.1, 0.1)
-            }):Play()
-        end
-    end
-    task.wait(0.5)
-    clearTrail()
-end
 
--- 5. 角色重生时恢复拖尾
-local function onCharacterAdded(newCharacter)
-    character = newCharacter
-    if isTrailActive then
-        newCharacter:WaitForChild("HumanoidRootPart")
-        task.wait(1)
-        startTrail()
-    end
-end
-
--- 6. 初始化（切换拖尾状态）
-isTrailActive = not isTrailActive
-if isTrailActive then
-    startTrail()
-    print("[彩虹拖尾] 已开启，移动角色即可看到效果！")
-else
-    stopTrail()
-    print("[彩虹拖尾] 已关闭")
-end
-
--- 绑定角色重生事件
-if player.Character then
-    onCharacterAdded(player.Character)
-end
-player.CharacterAdded:Connect(onCharacterAdded)
-
--- 暴露停止函数到全局（可选，方便手动关闭）
-getgenv().stopRainbowTrail = stopTrail
