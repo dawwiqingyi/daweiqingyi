@@ -1,15 +1,21 @@
--- SmokeFireEffect.lua（单独的烟雾火焰脚本，需上传到远程仓库）
+-- 修复后的 SmokeFireEffect.lua（远程脚本）
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
--- 初始化变量（依赖外部环境的变量需通过getgenv()获取）
+-- 从主代码全局环境获取依赖（关键：确保变量同步）
 local LocalPlayer = Players.LocalPlayer
-local smokeFireInstances = {}
-local smokeFireConnection = nil
-local smokeFireCharacter = nil
+local getgenv = getgenv()
+local statusText = getgenv().statusText -- 主代码的状态文本
+local cleanupList = getgenv().cleanupList -- 主代码的清理列表
 
--- 颜色配置
+-- 初始化变量
+local smokeFireInstances = {} -- 存储所有粒子/部件实例
+local smokeFireConnection = nil -- 帧监听连接
+local smokeFireCharacter = LocalPlayer.Character -- 初始角色
+local lastRootPosition = nil -- 上一帧角色位置（用于跟随判断）
+
+-- 颜色配置（不变）
 local fireColors = {
     Color3.fromRGB(255, 165, 0),
     Color3.fromRGB(255, 69, 0),
@@ -23,7 +29,26 @@ local smokeColors = {
     Color3.fromRGB(50, 50, 50)
 }
 
--- 1. 创建烟雾/火焰部件
+-- 1. 清理所有粒子实例（优化：确保彻底清理）
+local function clearSmokeFire()
+    -- 销毁所有实例
+    for _, instance in ipairs(smokeFireInstances) do
+        if instance and instance.Parent then
+            instance:Destroy()
+        end
+    end
+    smokeFireInstances = {} -- 清空列表
+    
+    -- 断开帧监听
+    if smokeFireConnection and smokeFireConnection.Connected then
+        smokeFireConnection:Disconnect()
+        smokeFireConnection = nil
+    end
+    
+    lastRootPosition = nil -- 重置上一帧位置
+end
+
+-- 2. 创建单个粒子部件（不变）
 local function createSmokeFirePart(position, scale, isFire)
     local part = Instance.new("Part")
     part.Name = isFire and ("FirePart_" .. LocalPlayer.Name) or ("SmokePart_" .. LocalPlayer.Name)
@@ -37,6 +62,7 @@ local function createSmokeFirePart(position, scale, isFire)
     part.Transparency = 0.3
     part.Parent = workspace
 
+    -- 火焰发光效果
     if isFire then
         local pointLight = Instance.new("PointLight")
         pointLight.Color = fireColors[1]
@@ -46,11 +72,13 @@ local function createSmokeFirePart(position, scale, isFire)
         table.insert(smokeFireInstances, pointLight)
     end
 
+    -- 粒子发射器
     local attachment = Instance.new("Attachment")
     attachment.Parent = part
     local particles = Instance.new("ParticleEmitter")
     particles.Parent = attachment
 
+    -- 粒子属性配置
     if isFire then
         particles.Color = ColorSequence.new(fireColors)
         particles.Size = NumberSequence.new({
@@ -86,100 +114,94 @@ local function createSmokeFirePart(position, scale, isFire)
     particles.EmissionDirection = Enum.NormalId.Top
     table.insert(smokeFireInstances, part)
     table.insert(smokeFireInstances, particles)
+
+    -- 粒子自动销毁（避免残留）
+    task.delay(isFire and 1 or 3, function()
+        if part and part.Parent then part:Destroy() end
+    end)
+
     return part
 end
 
--- 2. 清理实例
-local function clearSmokeFire()
-    for _, instance in ipairs(smokeFireInstances) do
-        if instance and instance.Parent then
-            instance:Destroy()
-        end
-    end
-    smokeFireInstances = {}
-    if smokeFireConnection and smokeFireConnection.Connected then
-        smokeFireConnection:Disconnect()
-        smokeFireConnection = nil
-    end
-end
-
--- 3. 启动效果
+-- 3. 核心跟随逻辑（重点优化）
 local function startSmokeFire()
-    clearSmokeFire()
+    clearSmokeFire() -- 先清理旧实例
+    
+    -- 等待角色加载（修复：确保获取到最新角色）
     smokeFireCharacter = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-    local humanoidRootPart = smokeFireCharacter:WaitForChild("HumanoidRootPart")
-    local lastPosition = humanoidRootPart.Position
+    local rootPart = smokeFireCharacter:WaitForChild("HumanoidRootPart", 5)
+    if not rootPart then
+        warn("❌ 烟雾火焰：未找到角色根部件")
+        if statusText then
+            statusText.Text = statusText.Text:gsub("\n烟雾火焰状态: [^\n]+", "")
+            statusText.Text = statusText.Text .. "\n烟雾火焰状态: 角色加载失败"
+        end
+        return
+    end
+    lastRootPosition = rootPart.Position -- 初始化上一帧位置
 
+    -- 每帧更新粒子（优化：降低移动阈值，提高跟随流畅度）
     smokeFireConnection = RunService.RenderStepped:Connect(function()
-        if not smokeFireCharacter or not smokeFireCharacter:FindFirstChild("HumanoidRootPart") then
+        -- 实时检查角色状态（修复：角色消失/死亡时停止）
+        if not smokeFireCharacter or not smokeFireCharacter.Parent or 
+           not smokeFireCharacter:FindFirstChild("HumanoidRootPart") or
+           (smokeFireCharacter:FindFirstChild("Humanoid") and smokeFireCharacter.Humanoid.Health <= 0) then
             stopSmokeFire()
             return
         end
 
-        local currentRootPart = smokeFireCharacter.HumanoidRootPart
-        local currentPosition = currentRootPart.Position
-        local baseRootSize = 2
-        local rawCharScale = currentRootPart.Size.X / baseRootSize
-        rawCharScale = rawCharScale < 0.1 and 1 or rawCharScale
-        local maxScale = 2
-        local charScale = math.min(rawCharScale, maxScale)
+        local currentRoot = smokeFireCharacter.HumanoidRootPart
+        local currentPosition = currentRoot.Position
+        local charScale = math.max(currentRoot.Size.X / 2, 0.5) -- 角色缩放（避免过小）
 
-        local distance = (currentPosition - lastPosition).Magnitude
-        local moveThreshold = 0.4 * charScale
-        if distance >= moveThreshold then
-            local firePart = createSmokeFirePart(lastPosition, charScale, true)
-            local smokePart = createSmokeFirePart(lastPosition + Vector3.new(0, 1, 0), charScale, false)
+        -- 优化：降低移动阈值（0.1*charScale），缓慢移动也生成粒子
+        local moveThreshold = 0.1 * charScale
+        local distance = (currentPosition - lastRootPosition).Magnitude
 
-            local fireTween = TweenService:Create(firePart, TweenInfo.new(0.7, Enum.EasingStyle.Quad), {
-                Transparency = 1,
-                Size = Vector3.new(0.1, 0.1, 0.1) * charScale
-            })
-            fireTween:Play()
-            fireTween.Completed:Connect(function() if firePart then firePart:Destroy() end end)
-
-            local smokeTween = TweenService:Create(smokePart, TweenInfo.new(2, Enum.EasingStyle.Quad), {
-                Transparency = 1,
-                Size = Vector3.new(4, 4, 4) * charScale
-            })
-            smokeTween:Play()
-            smokeTween.Completed:Connect(function() if smokePart then smokePart:Destroy() end end)
-
-            lastPosition = currentPosition
+        -- 生成粒子（跟随逻辑）
+        if distance >= moveThreshold or not lastRootPosition then
+            -- 火焰在角色位置，烟雾在角色上方（视觉更自然）
+            createSmokeFirePart(currentPosition, charScale, true) -- 火焰
+            createSmokeFirePart(currentPosition + Vector3.new(0, 1, 0), charScale, false) -- 烟雾
+            lastRootPosition = currentPosition -- 更新上一帧位置
         end
     end)
 
-    -- 加入外部清理列表（依赖外部环境的cleanupList）
-    if getgenv().cleanupList and getgenv().cleanupList.connections then
-        table.insert(getgenv().cleanupList.connections, smokeFireConnection)
+    -- 加入主代码的清理列表（确保UI销毁时同步清理）
+    if cleanupList and cleanupList.connections then
+        table.insert(cleanupList.connections, smokeFireConnection)
     end
 end
 
--- 4. 停止效果
+-- 4. 停止逻辑（不变）
 local function stopSmokeFire()
     clearSmokeFire()
-    local statusText = getgenv().statusText -- 从外部环境获取状态文本
     if statusText then
         statusText.Text = statusText.Text:gsub("\n烟雾火焰状态: [^\n]+", "")
     end
     print("❌ 烟雾火焰已关闭")
 end
 
--- 5. 角色重生适配
-local function onSmokeFireCharacterAdded(newCharacter)
-    smokeFireCharacter = newCharacter
+-- 5. 角色重生适配（修复：确保重生后重新跟随）
+local function onCharacterAdded(newChar)
+    smokeFireCharacter = newChar
+    -- 等待根部件加载（延迟0.5秒，避免加载不及时）
+    task.wait(0.5)
+    -- 只有开启状态下才重新启动（同步主代码开关）
     if getgenv().isSmokeFireEnabled then
-        newCharacter:WaitForChild("HumanoidRootPart")
-        task.wait(1)
         startSmokeFire()
+        print("✅ 烟雾火焰：角色重生，恢复跟随")
     end
 end
 
+-- 绑定角色重生事件（修复：确保首次加载和重生都生效）
 if LocalPlayer.Character then
-    onSmokeFireCharacterAdded(LocalPlayer.Character)
+    onCharacterAdded(LocalPlayer.Character)
 end
-LocalPlayer.CharacterAdded:Connect(onSmokeFireCharacterAdded)
+LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
 
--- 暴露核心函数到全局环境（供外部调用）
+-- 暴露函数到主代码全局环境
 getgenv().startSmokeFire = startSmokeFire
 getgenv().stopSmokeFire = stopSmokeFire
 getgenv().clearSmokeFire = clearSmokeFire
+getgenv().smokeFireInstances = smokeFireInstances -- 暴露实例列表，供主代码清理
