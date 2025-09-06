@@ -5,7 +5,7 @@ local LocalPlayer = Players.LocalPlayer
 
 -- 全局变量：控制粒子启用状态、存储粒子实例（供外部控制）
 getgenv().SmokeFireTrail = {
-    Enabled = true,  -- 外部可通过 SmokeFireTrail.Enabled 控制
+    Enabled = false,  -- 外部可通过 SmokeFireTrail.Enabled 控制
     Emitters = {}    -- 存储粒子发射器实例，用于清理
 }
 
@@ -83,7 +83,7 @@ local function createParticles(character)
     fireEmitter.Rate = 60
     fireEmitter.Speed = NumberRange.new(3, 7)
     fireEmitter.Rotation = NumberRange.new(0, 360)
-    fireEmitter.LightEmission = 0.19 -- 低光照，避免过亮
+    fireEmitter.LightEmission = 0.15 -- 低光照，避免过亮
     fireEmitter.Parent = root
 
     -- 存储粒子实例
