@@ -165,7 +165,7 @@ end
 isTrailActive = not isTrailActive  -- 初始切换（默认从false→true，可手动改为false）
 if isTrailActive and character then  -- 仅初始有角色且开启时执行
     startTrail()
-    print("[彩虹拖尾] 已开启，粒子最大放大3倍（可调整maxScale）！")
+    print("[彩虹拖尾] 已开启")
 else
     stopTrail()
     print("[彩虹拖尾] 已关闭")
