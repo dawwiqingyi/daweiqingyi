@@ -1,110 +1,120 @@
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+-- 无UI控制开关版本 - 粒子效果会自动启用并跟随角色移动
 local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
 
--- 1. 自动创建RemoteEvent（避免客户端找不到事件报错）
-local ToggleEvent = ReplicatedStorage:FindFirstChild("ToggleIceParticle")
-if not ToggleEvent then
-    ToggleEvent = Instance.new("RemoteEvent")
-    ToggleEvent.Name = "ToggleIceParticle"
-    ToggleEvent.Parent = ReplicatedStorage
-end
+-- 粒子效果始终启用
+local particleEmitters = {}
 
--- 2. 核心：创建极地冰粒子（原逻辑保留，优化容错）
-local function createIceParticle()
-    local emitter = Instance.new("ParticleEmitter")
-    emitter.Name = "IceParticle"
-    emitter.Texture = "rbxassetid://284205403" -- 冰雪贴图（确保ID有效）
-    emitter.Color = ColorSequence.new(Color3.fromRGB(200, 230, 255), Color3.fromRGB(150, 200, 255))
-    emitter.LightEmission = 0.7
-    emitter.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.5), NumberSequenceKeypoint.new(1, 1.5)})
-    emitter.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.2), NumberSequenceKeypoint.new(1, 1)})
-    emitter.Rate = 30
-    emitter.Lifetime = NumberRange.new(1, 2)
-    emitter.Speed = NumberRange.new(0.5, 1.5)
-    emitter.SpreadAngle = Vector2.new(360, 360)
-    emitter.Enabled = true
-    return emitter
-end
-
--- 3. 核心：创建雪花粒子（3个不同层级，原逻辑保留）
-local function createSnowParticle(index)
-    local emitter = Instance.new("ParticleEmitter")
-    emitter.Name = "SnowParticle" .. tostring(index)
-    emitter.Texture = "rbxassetid://7733779476" -- 雪花贴图（确保ID有效）
-    emitter.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(200, 220, 255))
-    emitter.LightEmission = 0.5
-    emitter.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.3 + 0.1 * index), NumberSequenceKeypoint.new(1, 0.7 + 0.2 * index)})
-    emitter.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.1), NumberSequenceKeypoint.new(1, 1)})
-    emitter.Rate = 10 + 5 * index
-    emitter.Lifetime = NumberRange.new(1.5, 2.5)
-    emitter.Speed = NumberRange.new(0.2 + 0.2 * index, 0.8 + 0.2 * index)
-    emitter.SpreadAngle = Vector2.new(360, 360)
-    emitter.Enabled = true
-    return emitter
-end
-
--- 4. 核心：开关粒子（原逻辑保留，优化角色加载容错）
-local function toggleParticle(player, enable)
-    -- 容错：确保角色和HumanoidRootPart存在
-    if not player.Character then return end
-    local root = player.Character:FindFirstChild("HumanoidRootPart")
+-- 创建烟雾和烟雾状火焰粒子
+local function createParticleEmitters(character)
+    local root = character:FindFirstChild("HumanoidRootPart")
     if not root then return end
 
-    -- 查找已存在的粒子
-    local existingIce = root:FindFirstChild("IceParticle")
-    local snowParticles = {}
-    for i = 1, 3 do
-        snowParticles[i] = root:FindFirstChild("SnowParticle" .. tostring(i))
+    -- 清理旧实例
+    for i, emitter in particleEmitters do
+        if emitter and emitter.Parent == root then
+            emitter:Destroy()
+        end
     end
+    particleEmitters = {}
 
-    -- 开启：创建不存在的粒子
-    if enable then
-        if not existingIce then
-            local emitter = createIceParticle()
-            emitter.Parent = root
-            print("[服务器] 为" .. player.Name .. "创建冰粒子")
+    -- 烟雾粒子
+    local smoke = Instance.new("ParticleEmitter")
+    smoke.Name = "SmokeTrail"
+    smoke.Texture = "rbxasset://textures/particles/smoke_main.dds"
+    smoke.Color = ColorSequence.new(Color3.fromRGB(80,80,80), Color3.fromRGB(180,180,180))
+    smoke.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 2)})
+    smoke.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.5), NumberSequenceKeypoint.new(1, 1)})
+    smoke.Lifetime = NumberRange.new(0.6, 1.2)
+    smoke.Rate = 30
+    smoke.Speed = NumberRange.new(2, 4)
+    smoke.Rotation = NumberRange.new(0, 360)
+    smoke.Enabled = true  -- 始终启用
+    smoke.Parent = root
+
+    -- 烟雾状火焰粒子（深紫色渐变，带尾托）
+    local fire = Instance.new("ParticleEmitter")
+    fire.Name = "FireTrail"
+    fire.Texture = "rbxassetid://258128463" -- 官方烟雾贴图，更适合紫色烟雾火焰
+    fire.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(80, 0, 120)),      -- 深紫色
+        ColorSequenceKeypoint.new(0.2, Color3.fromRGB(120, 0, 180)),   -- 紫色
+        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(60, 0, 80)),     -- 暗紫
+        ColorSequenceKeypoint.new(0.8, Color3.fromRGB(30, 0, 40)),     -- 更暗紫
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(10, 0, 20))        -- 黑紫色，末端
+    })
+    fire.Size = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 2.2),      -- 起始较大
+        NumberSequenceKeypoint.new(0.2, 2.8),    -- 扩散
+        NumberSequenceKeypoint.new(0.6, 4.5),    -- 拖尾变大
+        NumberSequenceKeypoint.new(1, 7)         -- 尾部最大，虚化
+    })
+    fire.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0.08),     -- 中心亮
+        NumberSequenceKeypoint.new(0.3, 0.25),   -- 渐隐
+        NumberSequenceKeypoint.new(0.7, 0.7),    -- 尾部虚化
+        NumberSequenceKeypoint.new(1, 1)         -- 完全透明
+    })
+    fire.Lifetime = NumberRange.new(1.2, 2.2)
+    fire.Rate = 60
+    fire.Speed = NumberRange.new(3, 7)
+    fire.Rotation = NumberRange.new(0, 360)
+    fire.Enabled = true  -- 始终启用
+    fire.LightEmission = 0.15 -- 降低光照，更烟雾感
+    fire.Parent = root
+
+    particleEmitters = {smoke, fire}
+end
+
+-- 移除粒子
+local function removeParticleEmitters(character)
+    local root = character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    for i, emitter in particleEmitters do
+        if emitter and emitter.Parent == root then
+            emitter:Destroy()
         end
-        for i = 1, 3 do
-            if not snowParticles[i] then
-                local snowEmitter = createSnowParticle(i)
-                snowEmitter.Parent = root
-            end
-        end
-    -- 关闭：销毁已存在的粒子
-    else
-        if existingIce then
-            existingIce:Destroy()
-            print("[服务器] 为" .. player.Name .. "销毁冰粒子")
-        end
-        for i = 1, 3 do
-            if snowParticles[i] then
-                snowParticles[i]:Destroy()
+    end
+    particleEmitters = {}
+end
+
+-- 角色加载时自动添加粒子
+local function onCharacterAdded(character)
+    createParticleEmitters(character)
+end
+
+-- 监听角色重生事件
+LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
+
+-- 对当前已存在的角色应用粒子
+if LocalPlayer.Character then
+    onCharacterAdded(LocalPlayer.Character)
+end
+
+-- 角色移动检测，静止时不产生粒子
+local movementThreshold = 1.5 -- 速度阈值，低于此值认为静止
+
+local function updateParticleState()
+    while true do
+        task.wait(0.1)
+        local character = LocalPlayer.Character
+        if not character then continue end
+        local root = character:FindFirstChild("HumanoidRootPart")
+        if not root then continue end
+        
+        -- 根据移动速度控制粒子发射
+        if #particleEmitters > 0 then
+            local velocity = root.Velocity
+            local speed = velocity.Magnitude
+            local shouldEnable = speed > movementThreshold
+            for i, emitter in particleEmitters do
+                emitter.Enabled = shouldEnable
             end
         end
     end
 end
 
--- 5. 接收客户端指令（关键：绑定RemoteEvent）
-ToggleEvent.OnServerEvent:Connect(function(player, enable)
-    -- 安全校验：确保是合法玩家发送的请求
-    if not Players:FindFirstChild(player.Name) then return end
-    toggleParticle(player, enable)
-end)
+-- 启动移动检测循环
+task.spawn(updateParticleState)
 
--- 6. 角色重生处理：保留原逻辑（避免重生后粒子残留）
-Players.PlayerAdded:Connect(function(player)
-    player.CharacterAdded:Connect(function(character)
-        local root = character:WaitForChild("HumanoidRootPart", 3)
-        if not root then return end
-
-        -- 重生时销毁旧粒子
-        local existingIce = root:FindFirstChild("IceParticle")
-        if existingIce then existingIce:Destroy() end
-        for i = 1, 3 do
-            local snow = root:FindFirstChild("SnowParticle" .. tostring(i))
-            if snow then snow:Destroy() end
-        end
-    end)
-end)
-
-print("[服务器] 冰粒子脚本加载完成！")
+print("粒子效果已启动，无UI控制版本")
