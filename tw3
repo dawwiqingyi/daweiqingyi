@@ -1,19 +1,35 @@
--- 烟雾状火焰粒子效果（仅核心逻辑，用于集成到现有UI）
--- 不包含UI创建，仅提供开关控制函数
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
--- 玩家相关设置
+-- 1. 基础变量定义（保留核心状态和实例管理）
 local LocalPlayer = Players.LocalPlayer
+local particleEnabled = false  -- 粒子状态（默认关闭，由远程控制）
+local particleEmitters = {}    -- 存储粒子发射器实例，用于清理
+local movementThreshold = 1.5  -- 静止检测阈值
+local remoteEvent = nil        -- 远程控制事件（后续初始化）
 
--- 粒子系统状态变量
-local particleEnabled = false
-local particleEmitters = {}
-local movementThreshold = 1.5 -- 移动速度阈值
+-- 2. 确保远程事件存在（服务器会提前创建，客户端仅获取）
+local function initRemoteEvent()
+    -- 等待服务器创建的远程事件文件夹
+    local remoteFolder = ReplicatedStorage:WaitForChild("ParticleRemoteSystem", 10)
+    if not remoteFolder then
+        warn("[烟雾火焰] 未找到远程事件文件夹，远程控制失效")
+        return false
+    end
+    -- 获取控制当前玩家的远程事件
+    remoteEvent = remoteFolder:WaitForChild("ControlPlayerSmokeFlame")
+    if not remoteEvent then
+        warn("[烟雾火焰] 未找到远程控制事件，远程控制失效")
+        return false
+    end
+    return true
+end
 
--- 创建烟雾和火焰粒子
+-- 3. 粒子核心逻辑（创建/移除，复用原逻辑）
 local function createParticleEmitters(character)
-    -- 先清理旧粒子
+    -- 先清理旧粒子，避免残留
     removeParticleEmitters(character)
     
     local root = character:FindFirstChild("HumanoidRootPart")
@@ -21,7 +37,7 @@ local function createParticleEmitters(character)
 
     -- 烟雾粒子
     local smoke = Instance.new("ParticleEmitter")
-    smoke.Name = "SmokeTrail"
+    smoke.Name = "SmokeTrail_" .. LocalPlayer.Name  -- 加玩家名，方便区分
     smoke.Texture = "rbxasset://textures/particles/smoke_main.dds"
     smoke.Color = ColorSequence.new(Color3.fromRGB(80,80,80), Color3.fromRGB(180,180,180))
     smoke.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 2)})
@@ -33,114 +49,128 @@ local function createParticleEmitters(character)
     smoke.Enabled = particleEnabled
     smoke.Parent = root
 
-    -- 火焰粒子（烟雾状）
+    -- 深紫色烟雾火焰粒子
     local fire = Instance.new("ParticleEmitter")
-    fire.Name = "FireTrail"
+    fire.Name = "FireTrail_" .. LocalPlayer.Name  -- 加玩家名，方便区分
     fire.Texture = "rbxassetid://258128463"
     fire.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 100, 50)),   -- 火焰核心
-        ColorSequenceKeypoint.new(0.3, Color3.fromRGB(255, 150, 50)), -- 火焰中部
-        ColorSequenceKeypoint.new(0.6, Color3.fromRGB(255, 200, 100)),-- 火焰边缘
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(200, 150, 50))    -- 烟雾残留
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(80, 0, 120)),
+        ColorSequenceKeypoint.new(0.2, Color3.fromRGB(120, 0, 180)),
+        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(60, 0, 80)),
+        ColorSequenceKeypoint.new(0.8, Color3.fromRGB(30, 0, 40)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(10, 0, 20))
     })
     fire.Size = NumberSequence.new({
-        NumberSequenceKeypoint.new(0, 2),
-        NumberSequenceKeypoint.new(0.5, 4),
-        NumberSequenceKeypoint.new(1, 6)
+        NumberSequenceKeypoint.new(0, 2.2),
+        NumberSequenceKeypoint.new(0.2, 2.8),
+        NumberSequenceKeypoint.new(0.6, 4.5),
+        NumberSequenceKeypoint.new(1, 7)
     })
     fire.Transparency = NumberSequence.new({
-        NumberSequenceKeypoint.new(0, 0.1),
-        NumberSequenceKeypoint.new(0.7, 0.5),
+        NumberSequenceKeypoint.new(0, 0.08),
+        NumberSequenceKeypoint.new(0.3, 0.25),
+        NumberSequenceKeypoint.new(0.7, 0.7),
         NumberSequenceKeypoint.new(1, 1)
     })
-    fire.Lifetime = NumberRange.new(1, 2)
-    fire.Rate = 40
-    fire.Speed = NumberRange.new(3, 6)
+    fire.Lifetime = NumberRange.new(1.2, 2.2)
+    fire.Rate = 60
+    fire.Speed = NumberRange.new(3, 7)
     fire.Rotation = NumberRange.new(0, 360)
     fire.Enabled = particleEnabled
-    fire.LightEmission = 0.3
+    fire.LightEmission = 0.15
     fire.Parent = root
 
-    -- 添加粒子到管理列表
     particleEmitters = {smoke, fire}
+    print("[烟雾火焰] 已为玩家 " .. LocalPlayer.Name .. " 创建粒子效果")
 end
 
--- 移除粒子效果
 local function removeParticleEmitters(character)
     local root = character:FindFirstChild("HumanoidRootPart")
     if not root then return end
-    
-    -- 清理管理列表中的粒子
+    -- 销毁所有粒子发射器
     for _, emitter in ipairs(particleEmitters) do
         if emitter and emitter.Parent then
             emitter:Destroy()
         end
     end
     particleEmitters = {}
+    print("[烟雾火焰] 已清理玩家 " .. LocalPlayer.Name .. " 的粒子效果")
 end
 
--- 移动检测：静止时不产生粒子
+-- 4. 静止检测逻辑（复用原逻辑，移动时才显示粒子）
 local function updateParticleState()
     while true do
-        RunService.Heartbeat:Wait()
+        task.wait(0.1)
         local character = LocalPlayer.Character
-        if not character or not particleEnabled then continue end
-        
+        if not character or not particleEnabled or #particleEmitters == 0 then
+            continue
+        end
         local root = character:FindFirstChild("HumanoidRootPart")
         if not root then continue end
         
-        -- 根据移动速度控制粒子发射
+        -- 根据角色移动速度控制粒子是否发射
         local speed = root.Velocity.Magnitude
-        local shouldEmit = speed > movementThreshold
-        
+        local shouldEnable = speed > movementThreshold
         for _, emitter in ipairs(particleEmitters) do
-            if emitter then
-                emitter.Enabled = shouldEmit
-            end
+            emitter.Enabled = shouldEnable
         end
     end
 end
 
--- 角色加载时自动添加粒子（如果已启用）
+-- 5. 角色重生时恢复粒子（若当前是启用状态）
 local function onCharacterAdded(character)
+    -- 等待角色核心部件加载
+    local humanoid = character:WaitForChild("Humanoid", 5)
+    local root = character:WaitForChild("HumanoidRootPart", 5)
+    if not (humanoid and root and humanoid.Health > 0) then
+        return
+    end
+    -- 若粒子已启用，重生后重新创建
     if particleEnabled then
         createParticleEmitters(character)
     end
 end
 
--- 公开的开关控制函数，供现有UI调用
-local function toggleParticles(state)
-    -- 支持两种调用方式：toggleParticles() 切换状态，toggleParticles(true/false) 强制设置状态
-    if state ~= nil then
-        particleEnabled = state
-    else
-        particleEnabled = not particleEnabled
-    end
-    
-    local character = LocalPlayer.Character
-    if character then
+-- 6. 远程指令监听（核心：接收服务器的开关控制）
+local function listenRemoteControl()
+    if not remoteEvent then return end
+    -- 接收服务器发送的“开关状态”（true=开启，false=关闭）
+    remoteEvent.OnClientEvent:Connect(function(targetState)
+        particleEnabled = targetState
+        local character = LocalPlayer.Character
+        
         if particleEnabled then
-            createParticleEmitters(character)
+            -- 开启：创建粒子（若角色存在）
+            if character then
+                createParticleEmitters(character)
+            end
         else
-            removeParticleEmitters(character)
+            -- 关闭：移除粒子（若角色存在）
+            if character then
+                removeParticleEmitters(character)
+            end
         end
+    end)
+end
+
+-- 7. 初始化流程（按顺序执行）
+local function init()
+    -- 步骤1：初始化远程事件
+    local remoteReady = initRemoteEvent()
+    if not remoteReady then
+        return
     end
-    
-    return particleEnabled -- 返回当前状态
+    -- 步骤2：监听角色重生
+    LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
+    if LocalPlayer.Character then
+        onCharacterAdded(LocalPlayer.Character)
+    end
+    -- 步骤3：监听远程控制指令
+    listenRemoteControl()
+    -- 步骤4：启动静止检测循环
+    task.spawn(updateParticleState)
+    print("[烟雾火焰] 客户端初始化完成，等待远程控制指令")
 end
 
--- 初始化
-LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
-if LocalPlayer.Character then
-    onCharacterAdded(LocalPlayer.Character)
-end
-
--- 启动移动检测循环
-coroutine.wrap(updateParticleState)()
-
--- 暴露接口给现有UI
-return {
-    toggle = toggleParticles,
-    isEnabled = function() return particleEnabled end
-}
-    
+-- 启动初始化
+init()
