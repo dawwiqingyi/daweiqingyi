@@ -61,11 +61,12 @@ local function createParticles(character)
     fireEmitter.Name = "FireTrail"
     fireEmitter.Texture = "rbxassetid://258128463"  -- 官方烟雾贴图，适配紫色
     fireEmitter.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(80, 0, 120)),    -- 深紫
-        ColorSequenceKeypoint.new(0.2, Color3.fromRGB(120, 0, 180)), -- 紫色
-        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(60, 0, 80)),   -- 暗紫
-        ColorSequenceKeypoint.new(0.8, Color3.fromRGB(30, 0, 40)),   -- 更暗紫
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(10, 0, 20))      -- 黑紫（尾端）
+       ColorSequenceKeypoint.new(0, Color3.fromRGB(120, 0, 150)),    -- 深紫（起点）
+    ColorSequenceKeypoint.new(0.2, Color3.fromRGB(160, 20, 180)), -- 亮紫
+    ColorSequenceKeypoint.new(0.4, Color3.fromRGB(200, 100, 160)),-- 紫黄过渡（核心火焰色）
+    ColorSequenceKeypoint.new(0.6, Color3.fromRGB(220, 150, 80)), -- 黄橙（火焰最亮处）
+    ColorSequenceKeypoint.new(0.8, Color3.fromRGB(80, 20, 80)),   -- 暗紫橙
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(30, 0, 30))       -- 深紫黑（尾端）
     })
     fireEmitter.Size = NumberSequence.new({
         NumberSequenceKeypoint.new(0, 2.2), 
