@@ -1,19 +1,33 @@
--- 烟雾状火焰粒子核心逻辑（无UI开关，默认关闭，移动时触发）
+-- 烟雾状火焰粒子核心逻辑（静止时保留少许粒子，默认关闭）
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 
--- 全局变量：控制粒子启用状态、存储粒子实例（供外部控制）
+-- 全局变量：控制粒子启用状态、存储粒子实例+参数配置（新增静止/移动参数）
 getgenv().SmokeFireTrail = {
-    Enabled = false,  -- 默认关闭（修改为false）
-    Emitters = {}    -- 存储粒子发射器实例，用于清理
+    Enabled = false,  -- 默认关闭
+    Emitters = {},    -- 存储粒子发射器实例
+    -- 新增：区分移动/静止的粒子参数（核心：静止时降低频率、延长生命周期）
+    Params = {
+        Moving = {  -- 移动时参数（原效果）
+            SmokeRate = 30,          -- 烟雾粒子发射频率
+            FireRate = 60,           -- 火焰粒子发射频率
+            FireLifetime = NumberRange.new(1.2, 2.2), -- 火焰粒子生命周期
+            SmokeLifetime = NumberRange.new(0.6, 1.2) -- 烟雾粒子生命周期
+        },
+        Idle = {    -- 静止时参数（少许粒子效果）
+            SmokeRate = 2,           -- 烟雾粒子：极低频率（仅2个/秒）
+            FireRate = 5,            -- 火焰粒子：极低频率（仅5个/秒）
+            FireLifetime = NumberRange.new(3, 5),     -- 火焰粒子：延长生命周期（缓慢漂浮）
+            SmokeLifetime = NumberRange.new(2, 4)     -- 烟雾粒子：延长生命周期
+        }
+    }
 }
 
 -- 清理旧粒子（防止角色重生时残留）
 local function removeOldEmitters(character)
     local root = character:FindFirstChild("HumanoidRootPart")
     if not root then return end
-    -- 清理当前角色的粒子
     for _, emitter in ipairs(SmokeFireTrail.Emitters) do
         if emitter and emitter.Parent == root then
             emitter:Destroy()
@@ -22,19 +36,19 @@ local function removeOldEmitters(character)
     SmokeFireTrail.Emitters = {}
 end
 
--- 创建烟雾+火焰粒子
-local function createParticles(character)
-    -- 仅在启用状态下创建
+-- 创建烟雾+火焰粒子（支持动态切换参数）
+local function createParticles(character, isMoving)
     if not SmokeFireTrail.Enabled then return end
     
     local root = character:FindFirstChild("HumanoidRootPart")
     local humanoid = character:FindFirstChildOfClass("Humanoid")
     if not (root and humanoid and humanoid.Health > 0) then return end
     
-    -- 先清理旧粒子
     removeOldEmitters(character)
+    -- 根据状态选择参数（移动/静止）
+    local params = isMoving and SmokeFireTrail.Params.Moving or SmokeFireTrail.Params.Idle
 
-    -- 1. 烟雾粒子（灰色调，增强层次感）
+    -- 1. 烟雾粒子（静止时保留少量，增强层次感）
     local smokeEmitter = Instance.new("ParticleEmitter")
     smokeEmitter.Name = "SmokeTrail"
     smokeEmitter.Texture = "rbxasset://textures/particles/smoke_main.dds"
@@ -50,101 +64,129 @@ local function createParticles(character)
         NumberSequenceKeypoint.new(0, 0.5), 
         NumberSequenceKeypoint.new(1, 1)
     })
-    smokeEmitter.Lifetime = NumberRange.new(0.6, 1.2)
-    smokeEmitter.Rate = 30
-    smokeEmitter.Speed = NumberRange.new(2, 4)
+    smokeEmitter.Lifetime = params.SmokeLifetime  -- 绑定生命周期参数
+    smokeEmitter.Rate = params.SmokeRate          -- 绑定发射频率参数
+    smokeEmitter.Speed = NumberRange.new(1, 3)    -- 静止时降低速度（更飘柔）
     smokeEmitter.Rotation = NumberRange.new(0, 360)
     smokeEmitter.Parent = root
 
-    -- 2. 烟雾状火焰粒子（深紫色拖尾，核心视觉效果）
+    -- 2. 烟雾状火焰粒子（紫黄配色，静止时保留少许）
     local fireEmitter = Instance.new("ParticleEmitter")
     fireEmitter.Name = "FireTrail"
-    fireEmitter.Texture = "rbxassetid://258128463"  -- 官方烟雾贴图，适配紫色
+    fireEmitter.Texture = "rbxassetid://258128463"
     fireEmitter.Color = ColorSequence.new({
-       ColorSequenceKeypoint.new(0, Color3.fromRGB(120, 0, 150)),    -- 深紫（起点）
-    ColorSequenceKeypoint.new(0.2, Color3.fromRGB(160, 20, 180)), -- 亮紫
-    ColorSequenceKeypoint.new(0.4, Color3.fromRGB(200, 100, 160)),-- 紫黄过渡（核心火焰色）
-    ColorSequenceKeypoint.new(0.6, Color3.fromRGB(220, 150, 80)), -- 黄橙（火焰最亮处）
-    ColorSequenceKeypoint.new(0.8, Color3.fromRGB(80, 20, 80)),   -- 暗紫橙
-    ColorSequenceKeypoint.new(1, Color3.fromRGB(30, 0, 30))       -- 深紫黑（尾端）
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(120, 0, 150)),    -- 深紫（起点）
+        ColorSequenceKeypoint.new(0.2, Color3.fromRGB(160, 20, 180)), -- 亮紫
+        ColorSequenceKeypoint.new(0.4, Color3.fromRGB(200, 100, 160)),-- 紫黄过渡（核心）
+        ColorSequenceKeypoint.new(0.6, Color3.fromRGB(220, 150, 80)), -- 黄橙（最亮）
+        ColorSequenceKeypoint.new(0.8, Color3.fromRGB(80, 20, 80)),   -- 暗紫橙
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(30, 0, 30))       -- 深紫黑（尾端）
     })
     fireEmitter.Size = NumberSequence.new({
-        NumberSequenceKeypoint.new(0, 2.2), 
-        NumberSequenceKeypoint.new(0.2, 2.8), 
-        NumberSequenceKeypoint.new(0.6, 4.5), 
-        NumberSequenceKeypoint.new(1, 7)  -- 尾端放大，增强拖尾感
+        NumberSequenceKeypoint.new(0, 1.8),  -- 静止时缩小初始大小
+        NumberSequenceKeypoint.new(0.2, 2.5), 
+        NumberSequenceKeypoint.new(0.6, 4), 
+        NumberSequenceKeypoint.new(1, 6)      -- 尾端稍缩小，避免过于突兀
     })
     fireEmitter.Transparency = NumberSequence.new({
-        NumberSequenceKeypoint.new(0, 0.08), 
-        NumberSequenceKeypoint.new(0.3, 0.25), 
-        NumberSequenceKeypoint.new(0.7, 0.7), 
+        NumberSequenceKeypoint.new(0, 0.1),   -- 静止时略增加透明度（更柔和）
+        NumberSequenceKeypoint.new(0.3, 0.3), 
+        NumberSequenceKeypoint.new(0.7, 0.8), 
         NumberSequenceKeypoint.new(1, 1)
     })
-    fireEmitter.Lifetime = NumberRange.new(1.2, 2.2)
-    fireEmitter.Rate = 60
-    fireEmitter.Speed = NumberRange.new(3, 7)
+    fireEmitter.Lifetime = params.FireLifetime  -- 绑定生命周期（静止时更长）
+    fireEmitter.Rate = params.FireRate          -- 绑定发射频率（静止时更低）
+    fireEmitter.Speed = NumberRange.new(1, 4)   -- 静止时降低速度（缓慢飘出）
     fireEmitter.Rotation = NumberRange.new(0, 360)
-    fireEmitter.LightEmission = 0.19 -- 低光照，避免过亮
+    fireEmitter.LightEmission = 0.25            -- 略微提高光照，让静止粒子更明显
     fireEmitter.Parent = root
 
-    -- 存储粒子实例
-    table.insert(SmokeFireTrail.Emitters, smokeEmitter)
-    table.insert(SmokeFireTrail.Emitters, fireEmitter)
+    -- 存储粒子实例（标记类型，方便后续切换参数）
+    table.insert(SmokeFireTrail.Emitters, {Type = "Smoke", Emitter = smokeEmitter})
+    table.insert(SmokeFireTrail.Emitters, {Type = "Fire", Emitter = fireEmitter})
 end
 
--- 移动检测：静止时关闭粒子（节省性能）
+-- 新增：动态切换粒子参数（根据移动/静止状态）
+local function updateParticleParams(isMoving)
+    local params = isMoving and SmokeFireTrail.Params.Moving or SmokeFireTrail.Params.Idle
+    -- 遍历所有发射器，更新频率和生命周期（避免重建实例，优化性能）
+    for _, item in ipairs(SmokeFireTrail.Emitters) do
+        local emitter = item.Emitter
+        if not emitter or not emitter.Parent then continue end
+        
+        if item.Type == "Smoke" then
+            emitter.Rate = params.SmokeRate
+            emitter.Lifetime = params.SmokeLifetime
+        elseif item.Type == "Fire" then
+            emitter.Rate = params.FireRate
+            emitter.Lifetime = params.FireLifetime
+        end
+    end
+end
+
+-- 移动检测：修改为“切换参数”而非“禁用粒子”（核心修改）
 local function updateParticleState()
     local lastRoot = nil
+    local lastIsMoving = false  -- 记录上一帧状态，避免频繁切换参数
     while true do
         task.wait(0.1)
-        -- 仅在启用状态下更新
         if not SmokeFireTrail.Enabled then
-            -- 禁用时关闭所有粒子
-            for _, emitter in ipairs(SmokeFireTrail.Emitters) do
+            -- 仅禁用时才完全关闭粒子
+            for _, item in ipairs(SmokeFireTrail.Emitters) do
+                local emitter = item.Emitter
                 if emitter then emitter.Enabled = false end
             end
             continue
         end
 
-        -- 获取当前角色根部件
         local character = LocalPlayer.Character
         local root = character and character:FindFirstChild("HumanoidRootPart")
         if not root then 
             lastRoot = nil
+            lastIsMoving = false
             continue 
         end
 
-        -- 角色切换时重新创建粒子
+        -- 角色切换时重新创建粒子（初始按静止参数）
         if root ~= lastRoot then
-            createParticles(character)
+            createParticles(character, false)  -- 初始用静止参数，避免突兀
             lastRoot = root
+            lastIsMoving = false
         end
 
-        -- 检测移动速度：低于阈值（1.5）则关闭粒子
+        -- 检测移动状态（速度阈值保持1.5，可微调）
         local speed = root.Velocity.Magnitude
-        local shouldShow = speed > 1.5
-        for _, emitter in ipairs(SmokeFireTrail.Emitters) do
-            if emitter then emitter.Enabled = shouldShow end
+        local currentIsMoving = speed > 1.5
+
+        -- 仅状态变化时才切换参数（优化性能，避免每帧重复修改）
+        if currentIsMoving ~= lastIsMoving then
+            updateParticleParams(currentIsMoving)
+            lastIsMoving = currentIsMoving
+        end
+
+        -- 始终保持粒子启用（关键：静止时不再关闭，仅调整参数）
+        for _, item in ipairs(SmokeFireTrail.Emitters) do
+            local emitter = item.Emitter
+            if emitter then emitter.Enabled = true end
         end
     end
 end
 
--- 角色重生时重新创建粒子（仅在启用状态下）
+-- 角色重生时重新创建粒子（仅在启用状态下，初始按静止参数）
 LocalPlayer.CharacterAdded:Connect(function(character)
-    -- 等待角色加载完成（避免根部件未生成）
     local root = character:WaitForChild("HumanoidRootPart", 5)
     if root and SmokeFireTrail.Enabled then
         task.wait(0.2)  -- 延迟确保角色稳定
-        createParticles(character)
+        createParticles(character, false)  -- 重生后默认静止，用少许粒子参数
     end
 end)
 
--- 初始角色加载（如果角色已存在且启用状态为true）
+-- 初始角色加载（如果角色已存在且启用，初始按静止参数）
 if LocalPlayer.Character and SmokeFireTrail.Enabled then
-    createParticles(LocalPlayer.Character)
+    createParticles(LocalPlayer.Character, false)
 end
 
--- 启动移动检测循环（独立协程，不阻塞主逻辑）
+-- 启动移动检测循环
 task.spawn(updateParticleState)
 
-print("[烟雾火焰粒子] 加载完成，默认关闭（可通过 SmokeFireTrail.Enabled = true 开启）")
+print("[烟雾火焰粒子] 加载完成，默认关闭（静止时保留少许粒子）")
