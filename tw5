@@ -1,0 +1,213 @@
+-- 蝴蝶形状尾托粒子核心逻辑（无UI开关，默认关闭，停止时保留少许蝴蝶色）
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+
+-- 全局变量：控制粒子启用状态、存储粒子实例（供外部控制）
+getgenv().ButterflyTrail = {
+    Enabled = false,  -- 默认关闭
+    Emitters = {},    -- 存储粒子发射器实例
+    -- 新增：粒子参数配置（区分移动/静止状态）
+    ParticleConfig = {
+        -- 移动时参数（原效果）
+        Moving = {
+            ButterflyRate = 45,         -- 蝴蝶粒子发射频率
+            ButterflySizeStart = 1.8,   -- 蝴蝶粒子初始大小
+            ButterflySizeEnd = 4.5,     -- 蝴蝶粒子尾端大小
+            ButterflyLifetime = NumberRange.new(2.0, 3.5), -- 蝴蝶粒子生命周期
+            SparkleRate = 25            -- 闪烁粒子发射频率
+        },
+        -- 静止时参数（少许蝴蝶色）
+        Idle = {
+            ButterflyRate = 8,          -- 极低发射频率（仅少量粒子）
+            ButterflySizeStart = 1.2,   -- 粒子更小
+            ButterflySizeEnd = 2.5,     -- 尾端缩小
+            ButterflyLifetime = NumberRange.new(4, 6), -- 生命周期延长（缓慢漂浮）
+            SparkleRate = 0             -- 静止时关闭闪烁（只留蝴蝶色）
+        }
+    }
+}
+
+-- 清理旧粒子（防止角色重生时残留）
+local function removeOldEmitters(character)
+    local root = character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    for _, emitter in ipairs(ButterflyTrail.Emitters) do
+        if emitter and emitter.Parent == root then
+            emitter:Destroy()
+        end
+    end
+    ButterflyTrail.Emitters = {}
+end
+
+-- 创建蝴蝶+闪烁粒子（支持动态切换参数）
+local function createParticles(character)
+    if not ButterflyTrail.Enabled then return end
+    
+    local root = character:FindFirstChild("HumanoidRootPart")
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not (root and humanoid and humanoid.Health > 0) then return end
+    
+    removeOldEmitters(character)
+    local config = ButterflyTrail.ParticleConfig.Moving -- 初始用移动参数
+
+    -- 1. 闪烁粒子（仅移动时显示，静止时关闭）
+    local sparkleEmitter = Instance.new("ParticleEmitter")
+    sparkleEmitter.Name = "SparkleTrail"
+    sparkleEmitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+    sparkleEmitter.Color = ColorSequence.new(
+        Color3.fromRGB(255, 255, 255), 
+        Color3.fromRGB(200, 200, 255)
+    )
+    sparkleEmitter.Size = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0.5), 
+        NumberSequenceKeypoint.new(1, 1.2)
+    })
+    sparkleEmitter.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0.3), 
+        NumberSequenceKeypoint.new(1, 1)
+    })
+    sparkleEmitter.Lifetime = NumberRange.new(0.8, 1.5)
+    sparkleEmitter.Rate = config.SparkleRate -- 绑定闪烁发射频率
+    sparkleEmitter.Speed = NumberRange.new(1, 3)
+    sparkleEmitter.Rotation = NumberRange.new(0, 360)
+    sparkleEmitter.Parent = root
+
+    -- 2. 蝴蝶形状粒子（白黄红渐变、紫、青蓝渐变，支持动态参数）
+    local butterflyEmitter = Instance.new("ParticleEmitter")
+    butterflyEmitter.Name = "ButterflyTrail"
+    butterflyEmitter.Texture = "rbxassetid://241650934" -- 蝴蝶形状纹理
+    -- 白黄红渐变、紫、青蓝渐变色序列
+    butterflyEmitter.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),    -- 白色（起点）
+        ColorSequenceKeypoint.new(0.15, Color3.fromRGB(255, 255, 100)), -- 淡黄
+        ColorSequenceKeypoint.new(0.3, Color3.fromRGB(255, 200, 50)),   -- 黄色
+        ColorSequenceKeypoint.new(0.45, Color3.fromRGB(255, 100, 50)),  -- 橙红
+        ColorSequenceKeypoint.new(0.6, Color3.fromRGB(200, 50, 200)),   -- 紫色
+        ColorSequenceKeypoint.new(0.75, Color3.fromRGB(100, 150, 255)), -- 青色
+        ColorSequenceKeypoint.new(0.9, Color3.fromRGB(50, 100, 255)),   -- 蓝色
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(30, 50, 150))       -- 深蓝（尾端）
+    })
+    -- 初始绑定移动时的大小序列
+    butterflyEmitter.Size = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, config.ButterflySizeStart), 
+        NumberSequenceKeypoint.new(0.2, config.ButterflySizeStart + 0.4), 
+        NumberSequenceKeypoint.new(0.6, config.ButterflySizeStart + 1.5), 
+        NumberSequenceKeypoint.new(1, config.ButterflySizeEnd)
+    })
+    butterflyEmitter.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0.1), 
+        NumberSequenceKeypoint.new(0.3, 0.3), 
+        NumberSequenceKeypoint.new(0.7, 0.6), 
+        NumberSequenceKeypoint.new(1, 1)
+    })
+    butterflyEmitter.Lifetime = config.ButterflyLifetime -- 绑定生命周期
+    butterflyEmitter.Rate = config.ButterflyRate         -- 绑定发射频率
+    butterflyEmitter.Speed = NumberRange.new(2, 5)
+    butterflyEmitter.Rotation = NumberRange.new(0, 360)
+    butterflyEmitter.LightEmission = 0.3 -- 提高光照，让静止时的蝴蝶色更明显
+    butterflyEmitter.Parent = root
+
+    -- 存储粒子实例（标记类型，方便后续修改参数）
+    table.insert(ButterflyTrail.Emitters, {Type = "Sparkle", Emitter = sparkleEmitter})
+    table.insert(ButterflyTrail.Emitters, {Type = "Butterfly", Emitter = butterflyEmitter})
+end
+
+-- 新增：更新粒子参数（根据移动/静止状态切换）
+local function updateParticleParams(isMoving)
+    local config = isMoving 
+        and ButterflyTrail.ParticleConfig.Moving 
+        or ButterflyTrail.ParticleConfig.Idle
+
+    -- 遍历所有粒子发射器，更新参数
+    for _, item in ipairs(ButterflyTrail.Emitters) do
+        local emitter = item.Emitter
+        if not emitter or not emitter.Parent then continue end
+
+        if item.Type == "Sparkle" then
+            -- 闪烁粒子：静止时关闭（Rate=0），移动时恢复
+            emitter.Rate = config.SparkleRate
+        elseif item.Type == "Butterfly" then
+            -- 蝴蝶粒子：动态更新频率、大小、生命周期
+            emitter.Rate = config.ButterflyRate
+            emitter.Lifetime = config.ButterflyLifetime
+            -- 重新设置大小序列（匹配当前状态）
+            emitter.Size = NumberSequence.new({
+                NumberSequenceKeypoint.new(0, config.ButterflySizeStart), 
+                NumberSequenceKeypoint.new(0.2, config.ButterflySizeStart + 0.4), 
+                NumberSequenceKeypoint.new(0.6, config.ButterflySizeStart + 1.5), 
+                NumberSequenceKeypoint.new(1, config.ButterflySizeEnd)
+            })
+        end
+    end
+end
+
+-- 移动检测：修改为"切换参数"而非"禁用粒子"
+local function updateParticleState()
+    local lastRoot = nil
+    local lastIsMoving = false -- 记录上一帧是否移动，避免频繁切换参数
+    while true do
+        task.wait(0.1)
+        if not ButterflyTrail.Enabled then
+            -- 禁用时才完全关闭粒子
+            for _, item in ipairs(ButterflyTrail.Emitters) do
+                local emitter = item.Emitter
+                if emitter then emitter.Enabled = false end
+            end
+            continue
+        end
+
+        local character = LocalPlayer.Character
+        local root = character and character:FindFirstChild("HumanoidRootPart")
+        if not root then 
+            lastRoot = nil
+            lastIsMoving = false
+            continue 
+        end
+
+        -- 角色切换时重新创建粒子
+        if root ~= lastRoot then
+            createParticles(character)
+            lastRoot = root
+            lastIsMoving = false -- 重置移动状态
+        end
+
+        -- 检测移动状态（速度阈值保持1.5，可微调）
+        local speed = root.Velocity.Magnitude
+        local currentIsMoving = speed > 1.5
+
+        -- 仅当状态变化时才更新参数（优化性能）
+        if currentIsMoving ~= lastIsMoving then
+            updateParticleParams(currentIsMoving)
+            lastIsMoving = currentIsMoving
+        end
+
+        -- 始终保持粒子启用（关键：不再因静止禁用）
+        for _, item in ipairs(ButterflyTrail.Emitters) do
+            local emitter = item.Emitter
+            if emitter then emitter.Enabled = true end
+        end
+    end
+end
+
+-- 角色重生时重新创建粒子（仅在启用状态下）
+LocalPlayer.CharacterAdded:Connect(function(character)
+    local root = character:WaitForChild("HumanoidRootPart", 5)
+    if root and ButterflyTrail.Enabled then
+        task.wait(0.2)
+        createParticles(character)
+        -- 初始设为静止状态（避免重生时默认移动参数）
+        updateParticleParams(false)
+    end
+end)
+
+-- 初始角色加载（如果角色已存在且启用）
+if LocalPlayer.Character and ButterflyTrail.Enabled then
+    createParticles(LocalPlayer.Character)
+    updateParticleParams(false) -- 初始静止
+end
+
+-- 启动移动检测循环
+task.spawn(updateParticleState)
+
+print("[蝴蝶粒子] 加载完成")
