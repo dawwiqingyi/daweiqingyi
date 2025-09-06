@@ -19,9 +19,9 @@ getgenv().ButterflyTrail = {
         },
         -- 静止时参数（少许蝴蝶色）
         Idle = {
-            ButterflyRate = 8,          -- 极低发射频率（仅少量粒子）
-            ButterflySizeStart = 1.2,   -- 粒子更小
-            ButterflySizeEnd = 2.5,     -- 尾端缩小
+            ButterflyRate = 4,          -- 极低发射频率（仅少量粒子）
+            ButterflySizeStart = 1,   -- 粒子更小
+            ButterflySizeEnd = 2,     -- 尾端缩小
             ButterflyLifetime = NumberRange.new(4, 6), -- 生命周期延长（缓慢漂浮）
             SparkleRate = 0             -- 静止时关闭闪烁（只留蝴蝶色）
         }
