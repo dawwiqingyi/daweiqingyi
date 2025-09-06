@@ -1,22 +1,23 @@
--- 无UI控制开关版本 - 粒子效果会自动启用并跟随角色移动
+-- 烟雾状火焰粒子效果（仅核心逻辑，用于集成到现有UI）
+-- 不包含UI创建，仅提供开关控制函数
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+-- 玩家相关设置
 local LocalPlayer = Players.LocalPlayer
 
--- 粒子效果始终启用
+-- 粒子系统状态变量
+local particleEnabled = false
 local particleEmitters = {}
+local movementThreshold = 1.5 -- 移动速度阈值
 
--- 创建烟雾和烟雾状火焰粒子
+-- 创建烟雾和火焰粒子
 local function createParticleEmitters(character)
+    -- 先清理旧粒子
+    removeParticleEmitters(character)
+    
     local root = character:FindFirstChild("HumanoidRootPart")
     if not root then return end
-
-    -- 清理旧实例
-    for i, emitter in particleEmitters do
-        if emitter and emitter.Parent == root then
-            emitter:Destroy()
-        end
-    end
-    particleEmitters = {}
 
     -- 烟雾粒子
     local smoke = Instance.new("ParticleEmitter")
@@ -29,92 +30,117 @@ local function createParticleEmitters(character)
     smoke.Rate = 30
     smoke.Speed = NumberRange.new(2, 4)
     smoke.Rotation = NumberRange.new(0, 360)
-    smoke.Enabled = true  -- 始终启用
+    smoke.Enabled = particleEnabled
     smoke.Parent = root
 
-    -- 烟雾状火焰粒子（深紫色渐变，带尾托）
+    -- 火焰粒子（烟雾状）
     local fire = Instance.new("ParticleEmitter")
     fire.Name = "FireTrail"
-    fire.Texture = "rbxassetid://258128463" -- 官方烟雾贴图，更适合紫色烟雾火焰
+    fire.Texture = "rbxassetid://258128463"
     fire.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(80, 0, 120)),      -- 深紫色
-        ColorSequenceKeypoint.new(0.2, Color3.fromRGB(120, 0, 180)),   -- 紫色
-        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(60, 0, 80)),     -- 暗紫
-        ColorSequenceKeypoint.new(0.8, Color3.fromRGB(30, 0, 40)),     -- 更暗紫
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(10, 0, 20))        -- 黑紫色，末端
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 100, 50)),   -- 火焰核心
+        ColorSequenceKeypoint.new(0.3, Color3.fromRGB(255, 150, 50)), -- 火焰中部
+        ColorSequenceKeypoint.new(0.6, Color3.fromRGB(255, 200, 100)),-- 火焰边缘
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(200, 150, 50))    -- 烟雾残留
     })
     fire.Size = NumberSequence.new({
-        NumberSequenceKeypoint.new(0, 2.2),      -- 起始较大
-        NumberSequenceKeypoint.new(0.2, 2.8),    -- 扩散
-        NumberSequenceKeypoint.new(0.6, 4.5),    -- 拖尾变大
-        NumberSequenceKeypoint.new(1, 7)         -- 尾部最大，虚化
+        NumberSequenceKeypoint.new(0, 2),
+        NumberSequenceKeypoint.new(0.5, 4),
+        NumberSequenceKeypoint.new(1, 6)
     })
     fire.Transparency = NumberSequence.new({
-        NumberSequenceKeypoint.new(0, 0.08),     -- 中心亮
-        NumberSequenceKeypoint.new(0.3, 0.25),   -- 渐隐
-        NumberSequenceKeypoint.new(0.7, 0.7),    -- 尾部虚化
-        NumberSequenceKeypoint.new(1, 1)         -- 完全透明
+        NumberSequenceKeypoint.new(0, 0.1),
+        NumberSequenceKeypoint.new(0.7, 0.5),
+        NumberSequenceKeypoint.new(1, 1)
     })
-    fire.Lifetime = NumberRange.new(1.2, 2.2)
-    fire.Rate = 60
-    fire.Speed = NumberRange.new(3, 7)
+    fire.Lifetime = NumberRange.new(1, 2)
+    fire.Rate = 40
+    fire.Speed = NumberRange.new(3, 6)
     fire.Rotation = NumberRange.new(0, 360)
-    fire.Enabled = true  -- 始终启用
-    fire.LightEmission = 0.15 -- 降低光照，更烟雾感
+    fire.Enabled = particleEnabled
+    fire.LightEmission = 0.3
     fire.Parent = root
 
+    -- 添加粒子到管理列表
     particleEmitters = {smoke, fire}
 end
 
--- 移除粒子
+-- 移除粒子效果
 local function removeParticleEmitters(character)
     local root = character:FindFirstChild("HumanoidRootPart")
     if not root then return end
-    for i, emitter in particleEmitters do
-        if emitter and emitter.Parent == root then
+    
+    -- 清理管理列表中的粒子
+    for _, emitter in ipairs(particleEmitters) do
+        if emitter and emitter.Parent then
             emitter:Destroy()
         end
     end
     particleEmitters = {}
 end
 
--- 角色加载时自动添加粒子
-local function onCharacterAdded(character)
-    createParticleEmitters(character)
-end
-
--- 监听角色重生事件
-LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
-
--- 对当前已存在的角色应用粒子
-if LocalPlayer.Character then
-    onCharacterAdded(LocalPlayer.Character)
-end
-
--- 角色移动检测，静止时不产生粒子
-local movementThreshold = 1.5 -- 速度阈值，低于此值认为静止
-
+-- 移动检测：静止时不产生粒子
 local function updateParticleState()
     while true do
-        task.wait(0.1)
+        RunService.Heartbeat:Wait()
         local character = LocalPlayer.Character
-        if not character then continue end
+        if not character or not particleEnabled then continue end
+        
         local root = character:FindFirstChild("HumanoidRootPart")
         if not root then continue end
         
         -- 根据移动速度控制粒子发射
-        if #particleEmitters > 0 then
-            local velocity = root.Velocity
-            local speed = velocity.Magnitude
-            local shouldEnable = speed > movementThreshold
-            for i, emitter in particleEmitters do
-                emitter.Enabled = shouldEnable
+        local speed = root.Velocity.Magnitude
+        local shouldEmit = speed > movementThreshold
+        
+        for _, emitter in ipairs(particleEmitters) do
+            if emitter then
+                emitter.Enabled = shouldEmit
             end
         end
     end
 end
 
--- 启动移动检测循环
-task.spawn(updateParticleState)
+-- 角色加载时自动添加粒子（如果已启用）
+local function onCharacterAdded(character)
+    if particleEnabled then
+        createParticleEmitters(character)
+    end
+end
 
-print("粒子效果已启动，无UI控制版本")
+-- 公开的开关控制函数，供现有UI调用
+local function toggleParticles(state)
+    -- 支持两种调用方式：toggleParticles() 切换状态，toggleParticles(true/false) 强制设置状态
+    if state ~= nil then
+        particleEnabled = state
+    else
+        particleEnabled = not particleEnabled
+    end
+    
+    local character = LocalPlayer.Character
+    if character then
+        if particleEnabled then
+            createParticleEmitters(character)
+        else
+            removeParticleEmitters(character)
+        end
+    end
+    
+    return particleEnabled -- 返回当前状态
+end
+
+-- 初始化
+LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
+if LocalPlayer.Character then
+    onCharacterAdded(LocalPlayer.Character)
+end
+
+-- 启动移动检测循环
+coroutine.wrap(updateParticleState)()
+
+-- 暴露接口给现有UI
+return {
+    toggle = toggleParticles,
+    isEnabled = function() return particleEnabled end
+}
+    
