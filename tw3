@@ -36,6 +36,15 @@ local function removeOldEmitters(character)
     SmokeFireTrail.Emitters = {}
 end
 
+
+ -- 计算角色缩放（保留原限制逻辑）
+        local currentRootPart = character.HumanoidRootPart
+        local baseRootSize = 2
+        local rawCharScale = currentRootPart.Size.X / baseRootSize
+        rawCharScale = rawCharScale < 0.1 and 1 or rawCharScale
+        local maxScale = 5  -- 粒子最大放大倍数
+        local charScale = math.min(rawCharScale, maxScale)
+
 -- 创建烟雾+火焰粒子（支持动态切换参数）
 local function createParticles(character, isMoving)
     if not SmokeFireTrail.Enabled then return end
