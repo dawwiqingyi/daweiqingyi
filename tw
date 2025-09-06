@@ -1,15 +1,15 @@
--- 彩虹拖尾客户端核心逻辑（限制粒子最大大小，避免随角色过大）
+-- 彩虹拖尾客户端核心逻辑（已去除角色重生自动触发，仅手动控制）
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
 -- 初始化变量
 local player = Players.LocalPlayer
-local isTrailActive = false
-local trailParts = {}
-local trailConnection = nil
-local colorIndex = 0
-local character -- 存储当前角色实例
+local isTrailActive = false  -- 拖尾开关状态（默认关闭）
+local trailParts = {}         -- 存储拖尾部件实例
+local trailConnection = nil   -- 渲染循环连接
+local colorIndex = 0          -- 彩虹颜色索引
+local character = player.Character  -- 当前角色实例（仅初始赋值，不自动更新）
 
 -- 彩虹颜色数组
 local rainbowColors = {
@@ -26,7 +26,7 @@ local rainbowColors = {
 local function createTrailPart(position, color, scale)
     local part = Instance.new("Part")
     part.Name = "RainbowTrail_" .. player.Name
-    part.Size = Vector3.new(2, 2, 2) * scale -- 拖尾球体随角色缩放（但受上限限制）
+    part.Size = Vector3.new(2, 2, 2) * scale  -- 随角色缩放（受上限限制）
     part.Material = Enum.Material.Neon
     part.Color = color
     part.Anchored = true
@@ -35,28 +35,27 @@ local function createTrailPart(position, color, scale)
     part.Position = position
     part.Parent = workspace
 
-    -- 发光效果（光照范围随缩放，同样受上限限制）
+    -- 发光效果（光照范围随缩放）
     local pointLight = Instance.new("PointLight")
     pointLight.Color = color
     pointLight.Brightness = 2
     pointLight.Range = 10 * scale
     pointLight.Parent = part
 
-    -- 粒子效果（核心：基础大小改为0.3，避免粒子过大）
+    -- 粒子效果（核心：基础大小0.3，避免过大）
     local attachment = Instance.new("Attachment")
     attachment.Parent = part
     local particles = Instance.new("ParticleEmitter")
     particles.Parent = attachment
     particles.Color = ColorSequence.new(color)
-    -- 粒子基础大小从0.5改为0.3，再乘受上限的scale，进一步控制大小
     particles.Size = NumberSequence.new{
         NumberSequenceKeypoint.new(0, 0.3 * scale), 
         NumberSequenceKeypoint.new(1, 0)
     }
     particles.Lifetime = NumberRange.new(0.5, 3)
-    particles.Rate = 40 * scale -- 速率稍降，避免粒子过于密集
+    particles.Rate = 40 * scale
     particles.SpreadAngle = Vector2.new(45, 45)
-    particles.Speed = NumberRange.new(4 * scale, 8 * scale) -- 速度稍降，更显柔和
+    particles.Speed = NumberRange.new(4 * scale, 8 * scale)
     particles.EmissionDirection = Enum.NormalId.Top
 
     return part
@@ -70,44 +69,46 @@ local function clearTrail()
     trailParts = {}
 end
 
--- 3. 开始拖尾（核心：给角色缩放加固定上限，限制粒子最大大小）
+-- 3. 开始拖尾（核心：限制粒子最大大小，仅手动触发时执行）
 local function startTrail()
-    if trailConnection then return end
-    character = player.Character or player.CharacterAdded:Wait()
-    local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+    -- 若已有拖尾循环或无角色，直接返回（避免重复开启）
+    if trailConnection or not character then return end
+    
+    -- 等待角色根部件加载（仅手动开启时验证）
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then
+        warn("角色无根部件，无法开启彩虹拖尾")
+        return
+    end
+    
     local lastPosition = humanoidRootPart.Position
-
     trailConnection = RunService.RenderStepped:Connect(function()
-        if not character or not character:FindFirstChild("HumanoidRootPart") then
+        -- 若角色失效或拖尾关闭，停止循环
+        if not character or not character:FindFirstChild("HumanoidRootPart") or not isTrailActive then
             stopTrail()
             return
         end
 
-        -- 步骤1：计算角色原始缩放比例（基于HumanoidRootPart.Size）
+        -- 计算角色缩放（保留原限制逻辑）
         local currentRootPart = character.HumanoidRootPart
-        local baseRootSize = 2 -- 角色初始根部件大小（默认值，可根据实际调整）
+        local baseRootSize = 2
         local rawCharScale = currentRootPart.Size.X / baseRootSize
-        -- 避免缩放为0或负数导致错误
         rawCharScale = rawCharScale < 0.1 and 1 or rawCharScale
-
-        -- 步骤2：给缩放加固定上限（关键！避免粒子过大，可调整maxScale值）
-        local maxScale = 5 -- 粒子最大放大倍数（角色再大，粒子也只按3倍放大）
+        local maxScale = 5  -- 粒子最大放大倍数
         local charScale = math.min(rawCharScale, maxScale)
 
-        -- （可选）若想换方案二“根号缩放”，删除步骤2，改用下面这行：
-        -- local charScale = math.sqrt(rawCharScale) -- 根号削弱放大效果，无固定上限
-
-        -- 步骤3：移动阈值随缩放适配，避免多余拖尾
+        -- 移动阈值适配（避免静止生成拖尾）
         local currentPosition = currentRootPart.Position
         local distance = (currentPosition - lastPosition).Magnitude
         local moveThreshold = 0.5 * charScale
 
+        -- 移动时生成拖尾（保留原逻辑）
         if distance >= moveThreshold then
             colorIndex = (colorIndex % #rainbowColors) + 1
             local trailPart = createTrailPart(lastPosition, rainbowColors[colorIndex], charScale)
             table.insert(trailParts, trailPart)
 
-            -- 消失动画（目标大小随受上限的scale，避免缩小后残留过大）
+            -- 拖尾消失动画
             local tween = TweenService:Create(trailPart, TweenInfo.new(2, Enum.EasingStyle.Quad), {
                 Transparency = 1,
                 Size = Vector3.new(0.1, 0.1, 0.1) * charScale
@@ -115,7 +116,6 @@ local function startTrail()
             tween:Play()
             tween.Completed:Connect(function()
                 if trailPart then trailPart:Destroy() end
-                -- 从列表移除已销毁的拖尾
                 for i, p in ipairs(trailParts) do
                     if p == trailPart then
                         table.remove(trailParts, i)
@@ -128,7 +128,7 @@ local function startTrail()
         end
     end)
 
-    -- 加入原脚本清理列表，确保UI销毁时停止
+    -- 加入清理列表（确保UI销毁时停止）
     if getgenv().cleanupList and getgenv().cleanupList.connections then
         table.insert(getgenv().cleanupList.connections, trailConnection)
     end
@@ -136,20 +136,18 @@ end
 
 -- 4. 停止拖尾（快速清理，适配缩放上限）
 local function stopTrail()
+    -- 断开渲染循环连接
     if trailConnection and trailConnection.Connected then
         trailConnection:Disconnect()
         trailConnection = nil
     end
 
-    -- 清理现有拖尾时，同样用受上限的缩放
+    -- 清理现有拖尾（保留原缩放适配逻辑）
     local currentRootPart = character and character:FindFirstChild("HumanoidRootPart")
     local rawCharScale = currentRootPart and (currentRootPart.Size.X / 2) or 1
     rawCharScale = rawCharScale < 0.1 and 1 or rawCharScale
     local maxScale = 3
     local charScale = math.min(rawCharScale, maxScale)
-
-    -- （可选）若用方案二，替换成：
-    -- local charScale = currentRootPart and math.sqrt(currentRootPart.Size.X / 2) or 1
 
     for _, part in ipairs(trailParts) do
         if part and part.Parent then
@@ -163,31 +161,15 @@ local function stopTrail()
     trailParts = {}
 end
 
--- 5. 角色重生时恢复拖尾（确保重生后仍受缩放限制）
-local function onCharacterAdded(newCharacter)
-    character = newCharacter
-    if isTrailActive then
-        newCharacter:WaitForChild("HumanoidRootPart")
-        task.wait(1) -- 等待角色完全加载
-        startTrail()
-    end
-end
-
--- 6. 初始化：切换拖尾状态
-isTrailActive = not isTrailActive
-if isTrailActive then
+-- 5. 初始化：仅切换初始状态（去除角色自动绑定）
+isTrailActive = not isTrailActive  -- 初始切换（默认从false→true，可手动改为false）
+if isTrailActive and character then  -- 仅初始有角色且开启时执行
     startTrail()
-    print("[彩虹拖尾] 已开启，粒子最大放大3倍（可在代码中调整maxScale）！")
+    print("[彩虹拖尾] 已开启，粒子最大放大3倍（可调整maxScale）！")
 else
     stopTrail()
     print("[彩虹拖尾] 已关闭")
 end
 
--- 绑定角色重生事件
-if player.Character then
-    onCharacterAdded(player.Character)
-end
-player.CharacterAdded:Connect(onCharacterAdded)
-
--- 暴露全局停止函数，方便手动关闭
+-- 暴露全局停止函数（方便手动关闭，保留原功能）
 getgenv().stopRainbowTrail = stopTrail
