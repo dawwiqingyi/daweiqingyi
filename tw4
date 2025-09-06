@@ -23,14 +23,25 @@ getgenv().ButterflyEffect = {
 }
 
 -- 清理旧蝴蝶粒子（防止角色重生时残留）
+-- 清理旧蝴蝶粒子（防止角色重生时残留）
 local function removeOldButterflyEmitters(character)
     local root = character:FindFirstChild("HumanoidRootPart")
     if not root then return end
-    for _, emitter in ipairs(ButterflyEffect.Emitters) do
-        if emitter and emitter.Parent == root then
-            emitter:Destroy()
+    
+    -- 清理所有蝴蝶相关实例
+    for _, item in ipairs(ButterflyEffect.Emitters) do
+        if item and item.Emitter and item.Emitter.Parent then
+            item.Emitter:Destroy()
         end
     end
+    
+    -- 清理可能的附加物（震荡器的附件）
+    local wiggle = root:FindFirstChild("ButterflyWiggle")
+    if wiggle then wiggle:Destroy() end
+    
+    local oscillator = root:FindFirstChild("ButterflyOscillator")
+    if oscillator then oscillator:Destroy() end
+    
     ButterflyEffect.Emitters = {}
 end
 
@@ -110,8 +121,10 @@ local function createButterflyParticles(character, isMoving)
     oscillator.Parent = root
     
     -- 将蝴蝶粒子连接到震荡器，实现飘动效果
-    butterflyEmitter.Attachment0 = wiggle
-    table.insert(ButterflyEffect.Emitters, {Type = "Oscillator", Emitter = oscillator})
+      butterflyEmitter.Attachment0 = wiggle
+      
+      -- 存储震荡器实例
+      table.insert(ButterflyEffect.Emitters, {Type = "Oscillator", Emitter = oscillator})
     butterflyEmitter.LightEmission = 0.1 -- 轻微发光效果
     
     -- 粒子形状和分布
@@ -126,8 +139,19 @@ local function createButterflyParticles(character, isMoving)
     
     butterflyEmitter.Parent = root
     
-    -- 存储粒子实例
-    table.insert(ButterflyEffect.Emitters, {Type = "Butterfly", Emitter = butterflyEmitter})
+    -- 存储蝴蝶粒子实例
+      table.insert(ButterflyEffect.Emitters, {Type = "Butterfly", Emitter = butterflyEmitter})
+      
+      -- 添加纹理加载失败的备用方案
+      local function checkTextureLoad()
+          task.wait(0.5) -- 等待片刻检查纹理是否加载成功
+          if not butterflyEmitter.Texture.IsLoaded then
+              -- 尝试使用Roblox内置纹理作为备选
+              butterflyEmitter.Texture = "rbxasset://textures/particles/sparkle_main.dds"
+              print("[蝴蝶粒子] 主纹理加载失败，已切换到备用纹理")
+          end
+      end
+      task.spawn(checkTextureLoad)
 end
 
 -- 动态切换蝴蝶粒子参数（根据移动/静止状态）
