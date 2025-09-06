@@ -49,7 +49,13 @@ local function createButterflyParticles(character, isMoving)
     -- 蝴蝶粒子（使用Roblox自带的蝴蝶纹理）
     local butterflyEmitter = Instance.new("ParticleEmitter")
     butterflyEmitter.Name = "ButterflyEffect"
-    butterflyEmitter.Texture = "rbxassetid://14110810984" -- 蝴蝶纹理ID
+    -- 尝试使用多个蝴蝶纹理备选方案，确保能显示蝴蝶效果
+    -- 主纹理：高质量蝴蝶纹理
+    butterflyEmitter.Texture = "rbxassetid://4803550768" -- 蝴蝶纹理ID（已知可用）
+    
+    -- 蝴蝶形状特殊处理：添加定向属性使粒子看起来更像蝴蝶翅膀煽动
+    butterflyEmitter.Orientation = Enum.ParticleOrientation.Velocity
+    butterflyEmitter.BillboardGui = nil -- 确保使用粒子默认渲染
     
     -- 彩虹色蝴蝶（多种颜色渐变）
     butterflyEmitter.Color = ColorSequence.new({
@@ -83,17 +89,40 @@ local function createButterflyParticles(character, isMoving)
     -- 粒子运动特性（模拟蝴蝶飞行）
     butterflyEmitter.Lifetime = params.ButterflyLifetime  -- 绑定生命周期参数
     butterflyEmitter.Rate = params.ButterflyRate          -- 绑定发射频率参数
-    butterflyEmitter.Speed = NumberRange.new(2 * params.SpeedMultiplier, 6 * params.SpeedMultiplier) -- 速度随状态变化
-    butterflyEmitter.Acceleration = Vector3.new(0, 0.5, 0) -- 轻微向上加速，模拟向上飞行
-    butterflyEmitter.Rotation = NumberRange.new(-45, 45)
-    butterflyEmitter.RotSpeed = NumberRange.new(-10, 10) -- 缓慢旋转
+    -- 蝴蝶飞行特性优化
+    butterflyEmitter.Speed = NumberRange.new(1 * params.SpeedMultiplier, 4 * params.SpeedMultiplier) -- 调整速度更符合蝴蝶
+    butterflyEmitter.Acceleration = Vector3.new(0, 0.3, 0) -- 轻微向上加速，模拟蝴蝶飞行
+    butterflyEmitter.Rotation = NumberRange.new(-90, 90) -- 增加旋转范围
+    butterflyEmitter.RotSpeed = NumberRange.new(-20, 20) -- 增加旋转速度变化，模拟翅膀煽动
+    
+    -- 蝴蝶飘动效果：添加震荡器让粒子运动更像蝴蝶飞舞
+    local wiggle = Instance.new("Attachment")
+    wiggle.Name = "ButterflyWiggle"
+    wiggle.Parent = root
+    
+    local oscillator = Instance.new("Oscillator")
+    oscillator.Name = "ButterflyOscillator"
+    oscillator.Attachment0 = wiggle
+    oscillator.Attachment1 = wiggle
+    oscillator.Cframe = CFrame.new()
+    oscillator.Magnitude = 0.5
+    oscillator.Period = 1.5
+    oscillator.Parent = root
+    
+    -- 将蝴蝶粒子连接到震荡器，实现飘动效果
+    butterflyEmitter.Attachment0 = wiggle
+    table.insert(ButterflyEffect.Emitters, {Type = "Oscillator", Emitter = oscillator})
     butterflyEmitter.LightEmission = 0.1 -- 轻微发光效果
     
     -- 粒子形状和分布
-    butterflyEmitter.Shape = Enum.ParticleEmitterShape.Circle
+    -- 蝴蝶发射形状调整：使用半球形让蝴蝶从角色周围向上飞出
+    butterflyEmitter.Shape = Enum.ParticleEmitterShape.Hemisphere
     butterflyEmitter.ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume
     butterflyEmitter.ShapeInOut = Enum.ParticleEmitterShapeInOut.Outward
-    butterflyEmitter.ShapeSize = Vector3.new(2, 1, 2) -- 围绕角色的发射区域
+    butterflyEmitter.ShapeSize = Vector3.new(2, 1.5, 2) -- 调整发射区域
+    
+    -- 添加随机性使蝴蝶飞行更自然
+    butterflyEmitter.RandomVelocity = Vector3.new(1, 1, 1)
     
     butterflyEmitter.Parent = root
     
