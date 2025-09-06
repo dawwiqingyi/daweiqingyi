@@ -19,7 +19,7 @@ getgenv().SmokeFireTrail = {
         },
         -- 静止时参数（少许火焰色）
         Idle = {
-            FireRate = 5,           -- 极低发射频率（仅少量粒子）
+            FireRate = 2,           -- 极低发射频率（仅少量粒子）
             FireSizeStart = 1.5,    -- 粒子更小
             FireSizeEnd = 3,        -- 尾端缩小
             FireLifetime = NumberRange.new(3, 5), -- 生命周期延长（缓慢漂浮）
