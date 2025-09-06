@@ -1,0 +1,205 @@
+-- 科目三跳舞脚本（兼容手机忍者注入器版本）
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+
+-- 全局变量：控制科目三跳舞状态
+getgenv().Subject3Dance = {
+    Enabled = false,  -- 默认关闭
+    CurrentAnimation = nil,  -- 当前播放的动画
+    AnimationTrack = nil,    -- 动画轨道
+    OriginalAnimations = {}, -- 保存原始动画
+    -- 科目三动画ID列表（多个动画循环播放）
+    AnimationIds = {
+        "rbxassetid://15615322781", -- 科目三经典动作1
+        "rbxassetid://15615323893", -- 科目三经典动作2
+        "rbxassetid://15615325225", -- 科目三经典动作3
+        "rbxassetid://15615326562", -- 科目三经典动作4
+    },
+    CurrentAnimIndex = 1,  -- 当前动画索引
+    LoopConnection = nil   -- 循环连接
+}
+
+-- 兼容手机忍者注入器：检测环境并适配
+local function isNinjaInjector()
+    -- 检测是否为手机忍者注入器环境
+    return game:GetService("UserInputService").TouchEnabled and 
+           (getgenv().ninja_injector or getgenv().NINJA_INJECTOR or 
+            _G.ninja_injector or _G.NINJA_INJECTOR)
+end
+
+-- 清理旧动画和连接
+local function cleanupAnimations()
+    if Subject3Dance.AnimationTrack then
+        Subject3Dance.AnimationTrack:Stop()
+        Subject3Dance.AnimationTrack:Destroy()
+        Subject3Dance.AnimationTrack = nil
+    end
+    
+    if Subject3Dance.LoopConnection then
+        Subject3Dance.LoopConnection:Disconnect()
+        Subject3Dance.LoopConnection = nil
+    end
+    
+    Subject3Dance.CurrentAnimation = nil
+end
+
+-- 恢复原始动画（兼容忍者注入器）
+local function restoreOriginalAnimations(character)
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+    
+    -- 恢复原始动画脚本
+    local animate = character:FindFirstChild("Animate")
+    if animate then
+        animate.Enabled = true
+    end
+    
+    -- 忍者注入器特殊处理
+    if isNinjaInjector() then
+        -- 重新加载默认动画
+        pcall(function()
+            humanoid:ChangeState(Enum.HumanoidStateType.Landed)
+        end)
+    end
+end
+
+-- 播放科目三动画
+local function playSubject3Animation(character)
+    if not Subject3Dance.Enabled then return end
+    
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not (humanoid and humanoid.Health > 0) then return end
+    
+    cleanupAnimations()
+    
+    -- 禁用默认动画脚本
+    local animate = character:FindFirstChild("Animate")
+    if animate then
+        animate.Enabled = false
+    end
+    
+    -- 获取当前动画ID
+    local animId = Subject3Dance.AnimationIds[Subject3Dance.CurrentAnimIndex]
+    
+    -- 创建动画对象
+    local animation = Instance.new("Animation")
+    animation.AnimationId = animId
+    
+    -- 兼容忍者注入器：使用不同的加载方式
+    local success, animTrack = pcall(function()
+        if isNinjaInjector() then
+            -- 忍者注入器专用加载方式
+            return humanoid:LoadAnimation(animation)
+        else
+            -- 标准加载方式
+            local animator = humanoid:FindFirstChildOfClass("Animator")
+            if animator then
+                return animator:LoadAnimation(animation)
+            else
+                return humanoid:LoadAnimation(animation)
+            end
+        end
+    end)
+    
+    if success and animTrack then
+        Subject3Dance.AnimationTrack = animTrack
+        Subject3Dance.CurrentAnimation = animation
+        
+        -- 设置动画属性
+        animTrack.Priority = Enum.AnimationPriority.Action
+        animTrack.Looped = false  -- 不循环单个动画，通过脚本控制切换
+        
+        -- 播放动画
+        animTrack:Play()
+        
+        -- 动画结束时切换到下一个动画
+        Subject3Dance.LoopConnection = animTrack.Ended:Connect(function()
+            if Subject3Dance.Enabled then
+                -- 切换到下一个动画
+                Subject3Dance.CurrentAnimIndex = Subject3Dance.CurrentAnimIndex + 1
+                if Subject3Dance.CurrentAnimIndex > #Subject3Dance.AnimationIds then
+                    Subject3Dance.CurrentAnimIndex = 1
+                end
+                
+                -- 延迟0.2秒后播放下一个动画
+                task.wait(0.2)
+                if Subject3Dance.Enabled then
+                    playSubject3Animation(character)
+                end
+            end
+        end)
+        
+        print("[科目三跳舞] 播放动画: " .. animId)
+    else
+        warn("[科目三跳舞] 动画加载失败: " .. animId)
+    end
+end
+
+-- 停止科目三跳舞
+local function stopSubject3Dance()
+    Subject3Dance.Enabled = false
+    
+    local character = LocalPlayer.Character
+    if character then
+        cleanupAnimations()
+        restoreOriginalAnimations(character)
+    end
+    
+    print("[科目三跳舞] 已停止")
+end
+
+-- 开始科目三跳舞
+local function startSubject3Dance()
+    Subject3Dance.Enabled = true
+    Subject3Dance.CurrentAnimIndex = 1  -- 重置动画索引
+    
+    local character = LocalPlayer.Character
+    if character then
+        playSubject3Animation(character)
+        print("[科目三跳舞] 已开始")
+    else
+        warn("[科目三跳舞] 角色未找到")
+    end
+end
+
+-- 切换科目三跳舞状态
+local function toggleSubject3Dance(enabled)
+    if enabled then
+        startSubject3Dance()
+    else
+        stopSubject3Dance()
+    end
+end
+
+-- 角色重生时处理
+LocalPlayer.CharacterAdded:Connect(function(character)
+    -- 等待角色完全加载
+    local humanoid = character:WaitForChild("Humanoid", 10)
+    if humanoid and Subject3Dance.Enabled then
+        task.wait(1)  -- 等待1秒确保角色完全加载
+        playSubject3Animation(character)
+    end
+end)
+
+-- 角色移除时清理
+LocalPlayer.CharacterRemoving:Connect(function(character)
+    cleanupAnimations()
+end)
+
+-- 导出全局函数供UI调用
+getgenv().Subject3Dance.Toggle = toggleSubject3Dance
+getgenv().Subject3Dance.Start = startSubject3Dance
+getgenv().Subject3Dance.Stop = stopSubject3Dance
+
+-- 兼容性检测和提示
+if isNinjaInjector() then
+    print("[科目三跳舞] 检测到忍者注入器环境，已启用兼容模式")
+else
+    print("[科目三跳舞] 标准环境模式")
+end
+
+print("[科目三跳舞] 脚本加载完成，共" .. #Subject3Dance.AnimationIds .. "个动画")
+
+-- 返回模块（可选）
+return Subject3Dance
