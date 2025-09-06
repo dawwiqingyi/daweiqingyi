@@ -208,4 +208,4 @@ end
 -- 启动移动检测循环
 task.spawn(updateParticleState)
 
-print("[烟雾火焰粒子] 加载完成，默认关闭（停止时保留少许火焰色）")
+print("[烟雾火焰粒子] 加载完成")
