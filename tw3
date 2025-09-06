@@ -1,160 +1,147 @@
--- 烟雾火焰粒子控制逻辑（与彩虹拖尾保持一致的控制方式）
--- 全局存储，与彩虹拖尾使用相同的状态管理方式
-getgenv().smokeFlame = {
-    enabled = false,
-    instances = {},
-    connection = nil,
-    stop = function() end  -- 用于停止效果的空函数，初始化用
+-- 烟雾状火焰粒子核心逻辑（无UI开关，默认启用，移动时触发）
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+
+-- 全局变量：控制粒子启用状态、存储粒子实例（供外部控制）
+getgenv().SmokeFireTrail = {
+    Enabled = true,  -- 外部可通过 SmokeFireTrail.Enabled 控制
+    Emitters = {}    -- 存储粒子发射器实例，用于清理
 }
 
--- 粒子核心逻辑（封装为独立函数，供开关调用）
-local function createSmokeFlame(character)
-    -- 清理旧实例
-    for _, instance in ipairs(getgenv().smokeFlame.instances) do
-        if instance and instance.Parent then
-            instance:Destroy()
+-- 清理旧粒子（防止角色重生时残留）
+local function removeOldEmitters(character)
+    local root = character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    -- 清理当前角色的粒子
+    for _, emitter in ipairs(SmokeFireTrail.Emitters) do
+        if emitter and emitter.Parent == root then
+            emitter:Destroy()
         end
     end
-    getgenv().smokeFlame.instances = {}
+    SmokeFireTrail.Emitters = {}
+end
+
+-- 创建烟雾+火焰粒子
+local function createParticles(character)
+    -- 仅在启用状态下创建
+    if not SmokeFireTrail.Enabled then return end
     
-    -- 验证角色有效性
     local root = character:FindFirstChild("HumanoidRootPart")
-    local humanoid = character:FindFirstChild("Humanoid")
-    if not (root and humanoid and humanoid.Health > 0) then
-        return false
-    end
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not (root and humanoid and humanoid.Health > 0) then return end
+    
+    -- 先清理旧粒子
+    removeOldEmitters(character)
 
-    -- 创建烟雾粒子
-    local smoke = Instance.new("ParticleEmitter")
-    smoke.Name = "SmokeTrail_" .. game:GetService("Players").LocalPlayer.Name
-    smoke.Texture = "rbxasset://textures/particles/smoke_main.dds"
-    smoke.Color = ColorSequence.new(Color3.fromRGB(80,80,80), Color3.fromRGB(180,180,180))
-    smoke.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 2)})
-    smoke.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.5), NumberSequenceKeypoint.new(1, 1)})
-    smoke.Lifetime = NumberRange.new(0.6, 1.2)
-    smoke.Rate = 30
-    smoke.Speed = NumberRange.new(2, 4)
-    smoke.Rotation = NumberRange.new(0, 360)
-    smoke.Enabled = true
-    smoke.Parent = root
-    table.insert(getgenv().smokeFlame.instances, smoke)
-
-    -- 创建火焰粒子
-    local fire = Instance.new("ParticleEmitter")
-    fire.Name = "FireTrail_" .. game:GetService("Players").LocalPlayer.Name
-    fire.Texture = "rbxassetid://258128463"
-    fire.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(80, 0, 120)),
-        ColorSequenceKeypoint.new(0.2, Color3.fromRGB(120, 0, 180)),
-        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(60, 0, 80)),
-        ColorSequenceKeypoint.new(0.8, Color3.fromRGB(30, 0, 40)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(10, 0, 20))
+    -- 1. 烟雾粒子（灰色调，增强层次感）
+    local smokeEmitter = Instance.new("ParticleEmitter")
+    smokeEmitter.Name = "SmokeTrail"
+    smokeEmitter.Texture = "rbxasset://textures/particles/smoke_main.dds"
+    smokeEmitter.Color = ColorSequence.new(
+        Color3.fromRGB(80, 80, 80), 
+        Color3.fromRGB(180, 180, 180)
+    )
+    smokeEmitter.Size = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 1), 
+        NumberSequenceKeypoint.new(1, 2)
     })
-    fire.Size = NumberSequence.new({
-        NumberSequenceKeypoint.new(0, 2.2),
-        NumberSequenceKeypoint.new(0.2, 2.8),
-        NumberSequenceKeypoint.new(0.6, 4.5),
-        NumberSequenceKeypoint.new(1, 7)
-    })
-    fire.Transparency = NumberSequence.new({
-        NumberSequenceKeypoint.new(0, 0.08),
-        NumberSequenceKeypoint.new(0.3, 0.25),
-        NumberSequenceKeypoint.new(0.7, 0.7),
+    smokeEmitter.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0.5), 
         NumberSequenceKeypoint.new(1, 1)
     })
-    fire.Lifetime = NumberRange.new(1.2, 2.2)
-    fire.Rate = 60
-    fire.Speed = NumberRange.new(3, 7)
-    fire.Rotation = NumberRange.new(0, 360)
-    fire.Enabled = true
-    fire.LightEmission = 0.15
-    fire.Parent = root
-    table.insert(getgenv().smokeFlame.instances, fire)
+    smokeEmitter.Lifetime = NumberRange.new(0.6, 1.2)
+    smokeEmitter.Rate = 30
+    smokeEmitter.Speed = NumberRange.new(2, 4)
+    smokeEmitter.Rotation = NumberRange.new(0, 360)
+    smokeEmitter.Parent = root
 
-    -- 移动检测（静止时关闭粒子）
-    local movementThreshold = 1.5
-    local updateConnection
-    updateConnection = game:GetService("RunService").Heartbeat:Connect(function()
-        if not getgenv().smokeFlame.enabled then
-            updateConnection:Disconnect()
-            return
-        end
-        
-        local speed = root.Velocity.Magnitude
-        local shouldEmit = speed > movementThreshold
-        smoke.Enabled = shouldEmit
-        fire.Enabled = shouldEmit
-    end)
-    
-    -- 存储停止函数
-    getgenv().smokeFlame.stop = function()
-        if updateConnection then
-            updateConnection:Disconnect()
-        end
-    end
-    
-    return true
+    -- 2. 烟雾状火焰粒子（深紫色拖尾，核心视觉效果）
+    local fireEmitter = Instance.new("ParticleEmitter")
+    fireEmitter.Name = "FireTrail"
+    fireEmitter.Texture = "rbxassetid://258128463"  -- 官方烟雾贴图，适配紫色
+    fireEmitter.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(80, 0, 120)),    -- 深紫
+        ColorSequenceKeypoint.new(0.2, Color3.fromRGB(120, 0, 180)), -- 紫色
+        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(60, 0, 80)),   -- 暗紫
+        ColorSequenceKeypoint.new(0.8, Color3.fromRGB(30, 0, 40)),   -- 更暗紫
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(10, 0, 20))      -- 黑紫（尾端）
+    })
+    fireEmitter.Size = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 2.2), 
+        NumberSequenceKeypoint.new(0.2, 2.8), 
+        NumberSequenceKeypoint.new(0.6, 4.5), 
+        NumberSequenceKeypoint.new(1, 7)  -- 尾端放大，增强拖尾感
+    })
+    fireEmitter.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0.08), 
+        NumberSequenceKeypoint.new(0.3, 0.25), 
+        NumberSequenceKeypoint.new(0.7, 0.7), 
+        NumberSequenceKeypoint.new(1, 1)
+    })
+    fireEmitter.Lifetime = NumberRange.new(1.2, 2.2)
+    fireEmitter.Rate = 60
+    fireEmitter.Speed = NumberRange.new(3, 7)
+    fireEmitter.Rotation = NumberRange.new(0, 360)
+    fireEmitter.LightEmission = 0.15  -- 低光照，避免过亮
+    fireEmitter.Parent = root
+
+    -- 存储粒子实例
+    table.insert(SmokeFireTrail.Emitters, smokeEmitter)
+    table.insert(SmokeFireTrail.Emitters, fireEmitter)
 end
 
--- 远程加载的主脚本（与彩虹拖尾链接格式一致）
-local SMOKE_FLAME_LINK = "https://raw.githubusercontent.com/dawwiqingyi/daweiqingyi/refs/heads/main/smoke_flame"
-
--- 对外提供的控制接口（与彩虹拖尾API一致）
-return function(enabled)
-    local LocalPlayer = game:GetService("Players").LocalPlayer
-    getgenv().smokeFlame.enabled = enabled
-    
-    -- 停止现有效果
-    getgenv().smokeFlame.stop()
-    
-    -- 清理实例
-    for _, instance in ipairs(getgenv().smokeFlame.instances) do
-        if instance and instance.Parent then
-            instance:Destroy()
-        end
-    end
-    getgenv().smokeFlame.instances = {}
-    
-    -- 断开之前的重生连接
-    if getgenv().smokeFlame.connection then
-        getgenv().smokeFlame.connection:Disconnect()
-    end
-    
-    if enabled then
-        -- 角色重生监听（与彩虹拖尾逻辑一致）
-        getgenv().smokeFlame.connection = LocalPlayer.CharacterAdded:Connect(function(character)
-            task.spawn(function()
-                -- 等待角色加载
-                local root = character:WaitForChild("HumanoidRootPart", 5)
-                if root then
-                    createSmokeFlame(character)
-                    print("✅ 角色重生，烟雾火焰已重新应用")
-                end
-            end)
-        end)
-        
-        -- 应用到当前角色
-        local currentChar = LocalPlayer.Character
-        if currentChar then
-            task.spawn(function()
-                createSmokeFlame(currentChar)
-            end)
-        end
-        
-        -- 远程加载额外逻辑（与彩虹拖尾保持一致）
-        local success, err = pcall(function()
-            local scriptCode = game:HttpGet(SMOKE_FLAME_LINK)
-            local runScript = loadstring(scriptCode)
-            if runScript then
-                runScript()
+-- 移动检测：静止时关闭粒子（节省性能）
+local function updateParticleState()
+    local lastRoot = nil
+    while true do
+        task.wait(0.1)
+        -- 仅在启用状态下更新
+        if not SmokeFireTrail.Enabled then
+            -- 禁用时关闭所有粒子
+            for _, emitter in ipairs(SmokeFireTrail.Emitters) do
+                if emitter then emitter.Enabled = false end
             end
-        end)
-        
-        return success
-    else
-        -- 关闭状态
-        print("❌ 烟雾火焰已关闭")
-        return true
+            continue
+        end
+
+        -- 获取当前角色根部件
+        local character = LocalPlayer.Character
+        local root = character and character:FindFirstChild("HumanoidRootPart")
+        if not root then 
+            lastRoot = nil
+            continue 
+        end
+
+        -- 角色切换时重新创建粒子
+        if root ~= lastRoot then
+            createParticles(character)
+            lastRoot = root
+        end
+
+        -- 检测移动速度：低于阈值（1.5）则关闭粒子
+        local speed = root.Velocity.Magnitude
+        local shouldShow = speed > 1.5
+        for _, emitter in ipairs(SmokeFireTrail.Emitters) do
+            if emitter then emitter.Enabled = shouldShow end
+        end
     end
 end
-    
+
+-- 角色重生时重新创建粒子
+LocalPlayer.CharacterAdded:Connect(function(character)
+    -- 等待角色加载完成（避免根部件未生成）
+    character:WaitForChild("HumanoidRootPart", 5)
+    task.wait(0.2)  -- 延迟确保角色稳定
+    createParticles(character)
+end)
+
+-- 初始角色加载（如果角色已存在）
+if LocalPlayer.Character then
+    createParticles(LocalPlayer.Character)
+end
+
+-- 启动移动检测循环（独立协程，不阻塞主逻辑）
+task.spawn(updateParticleState)
+
+print("[烟雾火焰粒子] 加载完成，默认启用（可通过 SmokeFireTrail.Enabled 控制）")
