@@ -1,43 +1,32 @@
+-- 烟雾火焰粒子控制逻辑（与彩虹拖尾保持一致的控制方式）
+-- 全局存储，与彩虹拖尾使用相同的状态管理方式
+getgenv().smokeFlame = {
+    enabled = false,
+    instances = {},
+    connection = nil,
+    stop = function() end  -- 用于停止效果的空函数，初始化用
+}
 
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
--- 1. 基础变量定义（保留核心状态和实例管理）
-local LocalPlayer = Players.LocalPlayer
-local particleEnabled = false  -- 粒子状态（默认关闭，由远程控制）
-local particleEmitters = {}    -- 存储粒子发射器实例，用于清理
-local movementThreshold = 1.5  -- 静止检测阈值
-local remoteEvent = nil        -- 远程控制事件（后续初始化）
-
--- 2. 确保远程事件存在（服务器会提前创建，客户端仅获取）
-local function initRemoteEvent()
-    -- 等待服务器创建的远程事件文件夹
-    local remoteFolder = ReplicatedStorage:WaitForChild("ParticleRemoteSystem", 10)
-    if not remoteFolder then
-        warn("[烟雾火焰] 未找到远程事件文件夹，远程控制失效")
-        return false
+-- 粒子核心逻辑（封装为独立函数，供开关调用）
+local function createSmokeFlame(character)
+    -- 清理旧实例
+    for _, instance in ipairs(getgenv().smokeFlame.instances) do
+        if instance and instance.Parent then
+            instance:Destroy()
+        end
     end
-    -- 获取控制当前玩家的远程事件
-    remoteEvent = remoteFolder:WaitForChild("ControlPlayerSmokeFlame")
-    if not remoteEvent then
-        warn("[烟雾火焰] 未找到远程控制事件，远程控制失效")
-        return false
-    end
-    return true
-end
-
--- 3. 粒子核心逻辑（创建/移除，复用原逻辑）
-local function createParticleEmitters(character)
-    -- 先清理旧粒子，避免残留
-    removeParticleEmitters(character)
+    getgenv().smokeFlame.instances = {}
     
+    -- 验证角色有效性
     local root = character:FindFirstChild("HumanoidRootPart")
-    if not root then return end
+    local humanoid = character:FindFirstChild("Humanoid")
+    if not (root and humanoid and humanoid.Health > 0) then
+        return false
+    end
 
-    -- 烟雾粒子
+    -- 创建烟雾粒子
     local smoke = Instance.new("ParticleEmitter")
-    smoke.Name = "SmokeTrail_" .. LocalPlayer.Name  -- 加玩家名，方便区分
+    smoke.Name = "SmokeTrail_" .. game:GetService("Players").LocalPlayer.Name
     smoke.Texture = "rbxasset://textures/particles/smoke_main.dds"
     smoke.Color = ColorSequence.new(Color3.fromRGB(80,80,80), Color3.fromRGB(180,180,180))
     smoke.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 2)})
@@ -46,12 +35,13 @@ local function createParticleEmitters(character)
     smoke.Rate = 30
     smoke.Speed = NumberRange.new(2, 4)
     smoke.Rotation = NumberRange.new(0, 360)
-    smoke.Enabled = particleEnabled
+    smoke.Enabled = true
     smoke.Parent = root
+    table.insert(getgenv().smokeFlame.instances, smoke)
 
-    -- 深紫色烟雾火焰粒子
+    -- 创建火焰粒子
     local fire = Instance.new("ParticleEmitter")
-    fire.Name = "FireTrail_" .. LocalPlayer.Name  -- 加玩家名，方便区分
+    fire.Name = "FireTrail_" .. game:GetService("Players").LocalPlayer.Name
     fire.Texture = "rbxassetid://258128463"
     fire.Color = ColorSequence.new({
         ColorSequenceKeypoint.new(0, Color3.fromRGB(80, 0, 120)),
@@ -76,101 +66,95 @@ local function createParticleEmitters(character)
     fire.Rate = 60
     fire.Speed = NumberRange.new(3, 7)
     fire.Rotation = NumberRange.new(0, 360)
-    fire.Enabled = particleEnabled
+    fire.Enabled = true
     fire.LightEmission = 0.15
     fire.Parent = root
+    table.insert(getgenv().smokeFlame.instances, fire)
 
-    particleEmitters = {smoke, fire}
-    print("[烟雾火焰] 已为玩家 " .. LocalPlayer.Name .. " 创建粒子效果")
-end
-
-local function removeParticleEmitters(character)
-    local root = character:FindFirstChild("HumanoidRootPart")
-    if not root then return end
-    -- 销毁所有粒子发射器
-    for _, emitter in ipairs(particleEmitters) do
-        if emitter and emitter.Parent then
-            emitter:Destroy()
+    -- 移动检测（静止时关闭粒子）
+    local movementThreshold = 1.5
+    local updateConnection
+    updateConnection = game:GetService("RunService").Heartbeat:Connect(function()
+        if not getgenv().smokeFlame.enabled then
+            updateConnection:Disconnect()
+            return
         end
-    end
-    particleEmitters = {}
-    print("[烟雾火焰] 已清理玩家 " .. LocalPlayer.Name .. " 的粒子效果")
-end
-
--- 4. 静止检测逻辑（复用原逻辑，移动时才显示粒子）
-local function updateParticleState()
-    while true do
-        task.wait(0.1)
-        local character = LocalPlayer.Character
-        if not character or not particleEnabled or #particleEmitters == 0 then
-            continue
-        end
-        local root = character:FindFirstChild("HumanoidRootPart")
-        if not root then continue end
         
-        -- 根据角色移动速度控制粒子是否发射
         local speed = root.Velocity.Magnitude
-        local shouldEnable = speed > movementThreshold
-        for _, emitter in ipairs(particleEmitters) do
-            emitter.Enabled = shouldEnable
-        end
-    end
-end
-
--- 5. 角色重生时恢复粒子（若当前是启用状态）
-local function onCharacterAdded(character)
-    -- 等待角色核心部件加载
-    local humanoid = character:WaitForChild("Humanoid", 5)
-    local root = character:WaitForChild("HumanoidRootPart", 5)
-    if not (humanoid and root and humanoid.Health > 0) then
-        return
-    end
-    -- 若粒子已启用，重生后重新创建
-    if particleEnabled then
-        createParticleEmitters(character)
-    end
-end
-
--- 6. 远程指令监听（核心：接收服务器的开关控制）
-local function listenRemoteControl()
-    if not remoteEvent then return end
-    -- 接收服务器发送的“开关状态”（true=开启，false=关闭）
-    remoteEvent.OnClientEvent:Connect(function(targetState)
-        particleEnabled = targetState
-        local character = LocalPlayer.Character
-        
-        if particleEnabled then
-            -- 开启：创建粒子（若角色存在）
-            if character then
-                createParticleEmitters(character)
-            end
-        else
-            -- 关闭：移除粒子（若角色存在）
-            if character then
-                removeParticleEmitters(character)
-            end
-        end
+        local shouldEmit = speed > movementThreshold
+        smoke.Enabled = shouldEmit
+        fire.Enabled = shouldEmit
     end)
+    
+    -- 存储停止函数
+    getgenv().smokeFlame.stop = function()
+        if updateConnection then
+            updateConnection:Disconnect()
+        end
+    end
+    
+    return true
 end
 
--- 7. 初始化流程（按顺序执行）
-local function init()
-    -- 步骤1：初始化远程事件
-    local remoteReady = initRemoteEvent()
-    if not remoteReady then
-        return
-    end
-    -- 步骤2：监听角色重生
-    LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
-    if LocalPlayer.Character then
-        onCharacterAdded(LocalPlayer.Character)
-    end
-    -- 步骤3：监听远程控制指令
-    listenRemoteControl()
-    -- 步骤4：启动静止检测循环
-    task.spawn(updateParticleState)
-    print("[烟雾火焰] 客户端初始化完成，等待远程控制指令")
-end
+-- 远程加载的主脚本（与彩虹拖尾链接格式一致）
+local SMOKE_FLAME_LINK = "https://raw.githubusercontent.com/dawwiqingyi/daweiqingyi/refs/heads/main/smoke_flame"
 
--- 启动初始化
-init()
+-- 对外提供的控制接口（与彩虹拖尾API一致）
+return function(enabled)
+    local LocalPlayer = game:GetService("Players").LocalPlayer
+    getgenv().smokeFlame.enabled = enabled
+    
+    -- 停止现有效果
+    getgenv().smokeFlame.stop()
+    
+    -- 清理实例
+    for _, instance in ipairs(getgenv().smokeFlame.instances) do
+        if instance and instance.Parent then
+            instance:Destroy()
+        end
+    end
+    getgenv().smokeFlame.instances = {}
+    
+    -- 断开之前的重生连接
+    if getgenv().smokeFlame.connection then
+        getgenv().smokeFlame.connection:Disconnect()
+    end
+    
+    if enabled then
+        -- 角色重生监听（与彩虹拖尾逻辑一致）
+        getgenv().smokeFlame.connection = LocalPlayer.CharacterAdded:Connect(function(character)
+            task.spawn(function()
+                -- 等待角色加载
+                local root = character:WaitForChild("HumanoidRootPart", 5)
+                if root then
+                    createSmokeFlame(character)
+                    print("✅ 角色重生，烟雾火焰已重新应用")
+                end
+            end)
+        end)
+        
+        -- 应用到当前角色
+        local currentChar = LocalPlayer.Character
+        if currentChar then
+            task.spawn(function()
+                createSmokeFlame(currentChar)
+            end)
+        end
+        
+        -- 远程加载额外逻辑（与彩虹拖尾保持一致）
+        local success, err = pcall(function()
+            local scriptCode = game:HttpGet(SMOKE_FLAME_LINK)
+            local runScript = loadstring(scriptCode)
+            if runScript then
+                runScript()
+            end
+        end)
+        
+        return success
+    else
+        -- 关闭状态
+        print("❌ 烟雾火焰已关闭")
+        return true
+    end
+end
+    
