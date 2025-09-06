@@ -1,11 +1,11 @@
--- 烟雾状火焰粒子核心逻辑（无UI开关，默认启用，移动时触发）
+-- 烟雾状火焰粒子核心逻辑（无UI开关，默认关闭，移动时触发）
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 
 -- 全局变量：控制粒子启用状态、存储粒子实例（供外部控制）
 getgenv().SmokeFireTrail = {
-    Enabled = false,  -- 外部可通过 SmokeFireTrail.Enabled 控制
+    Enabled = false,  -- 默认关闭（修改为false）
     Emitters = {}    -- 存储粒子发射器实例，用于清理
 }
 
@@ -83,7 +83,7 @@ local function createParticles(character)
     fireEmitter.Rate = 60
     fireEmitter.Speed = NumberRange.new(3, 7)
     fireEmitter.Rotation = NumberRange.new(0, 360)
-    fireEmitter.LightEmission = 0.15 -- 低光照，避免过亮
+    fireEmitter.LightEmission = 0.19 -- 低光照，避免过亮
     fireEmitter.Parent = root
 
     -- 存储粒子实例
@@ -128,20 +128,22 @@ local function updateParticleState()
     end
 end
 
--- 角色重生时重新创建粒子
+-- 角色重生时重新创建粒子（仅在启用状态下）
 LocalPlayer.CharacterAdded:Connect(function(character)
     -- 等待角色加载完成（避免根部件未生成）
-    character:WaitForChild("HumanoidRootPart", 5)
-    task.wait(0.2)  -- 延迟确保角色稳定
-    createParticles(character)
+    local root = character:WaitForChild("HumanoidRootPart", 5)
+    if root and SmokeFireTrail.Enabled then
+        task.wait(0.2)  -- 延迟确保角色稳定
+        createParticles(character)
+    end
 end)
 
--- 初始角色加载（如果角色已存在）
-if LocalPlayer.Character then
+-- 初始角色加载（如果角色已存在且启用状态为true）
+if LocalPlayer.Character and SmokeFireTrail.Enabled then
     createParticles(LocalPlayer.Character)
 end
 
 -- 启动移动检测循环（独立协程，不阻塞主逻辑）
 task.spawn(updateParticleState)
 
-print("[烟雾火焰粒子] 加载完成，默认启用（可通过 SmokeFireTrail.Enabled 控制）")
+print("[烟雾火焰粒子] 加载完成，默认关闭（可通过 SmokeFireTrail.Enabled = true 开启）")
