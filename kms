@@ -11,7 +11,7 @@ getgenv().Subject3Dance = {
     OriginalAnimations = {}, -- 保存原始动画
     -- 科目三动画ID列表（多个动画循环播放）
     AnimationIds = {
-        "rbxassetid://15615322781", -- 科目三经典动作1
+        "rbxassetid://243098098", -- 科目三经典动作1
         "rbxassetid://15615323893", -- 科目三经典动作2
         "rbxassetid://15615325225", -- 科目三经典动作3
         "rbxassetid://15615326562", -- 科目三经典动作4
