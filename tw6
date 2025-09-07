@@ -1,4 +1,3 @@
--- 新彩虹粒子系统 - 七色并排尾托带渐变和爆炸效果
 -- 远程加载版本
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -11,6 +10,10 @@ getgenv().isNewRainbowActive = false  -- 新彩虹粒子开关状态
 local trailParts = {}             -- 存储尾托部件
 local trailConnection = nil       -- 渲染循环连接
 local character = player.Character
+local isMoving = false            -- 角色是否正在移动
+local stopDetectionThreshold = 0.1 -- 停止移动的判定阈值
+local stopEffectCooldown = 1      -- 停止效果的冷却时间（秒）
+local lastStopEffectTime = 0      -- 上次播放停止效果的时间
 
 -- 七种彩虹颜色（红橙黄绿蓝靛紫）
 local rainbowColors = {
@@ -66,9 +69,13 @@ local function createTrailParticle(position, colorIndex, scale, alpha)
 end
 
 -- 创建粒子爆炸效果
-local function createExplosionEffect(position, scale)
-    for i = 1, #rainbowColors do
-        local color = rainbowColors[i]
+local function createExplosionEffect(position, scale, isSmall)
+    -- 小型爆炸效果（用于停止时）减少粒子数量
+    local particleCount = isSmall and 3 or #rainbowColors
+    
+    for i = 1, particleCount do
+        local colorIndex = isSmall and math.random(1, #rainbowColors) or i
+        local color = rainbowColors[colorIndex]
         
         -- 创建爆炸粒子
         local explosionPart = Instance.new("Part")
@@ -94,9 +101,9 @@ local function createExplosionEffect(position, scale)
             NumberSequenceKeypoint.new(1, 0)
         }
         particles.Lifetime = NumberRange.new(0.5, 2)
-        particles.Rate = 100
+        particles.Rate = isSmall and 50 or 100  -- 小型爆炸减少粒子发射率
         particles.SpreadAngle = Vector2.new(180, 180)
-        particles.Speed = NumberRange.new(8 * scale, 15 * scale)
+        particles.Speed = NumberRange.new(5 * scale, 10 * scale)  -- 小型爆炸速度稍慢
         particles.EmissionDirection = Enum.NormalId.Top
         
         -- 爆炸动画
@@ -115,6 +122,18 @@ local function createExplosionEffect(position, scale)
             if explosionPart then explosionPart:Destroy() end
         end)
     end
+end
+
+-- 创建人物停止时的小型爆炸效果
+local function createStopEffect(position, scale)
+    -- 检查冷却时间，避免频繁触发
+    if os.clock() - lastStopEffectTime < stopEffectCooldown then
+        return
+    end
+    
+    lastStopEffectTime = os.clock()
+    -- 创建小型爆炸效果（使用isSmall参数）
+    createExplosionEffect(position, scale * 0.7, true)
 end
 
 -- 创建七色并排尾托
@@ -189,6 +208,7 @@ local function startNewRainbowTrail()
     
     local lastPosition = humanoidRootPart.Position
     local trailCounter = 0
+    isMoving = false  -- 初始状态设为静止
     
     trailConnection = RunService.RenderStepped:Connect(function()
         if not character or not character:FindFirstChild("HumanoidRootPart") or not getgenv().isNewRainbowActive then
@@ -206,6 +226,15 @@ local function startNewRainbowTrail()
         local currentPosition = currentRootPart.Position
         local distance = (currentPosition - lastPosition).Magnitude
         local moveThreshold = 0.8 * charScale
+        
+        -- 检测移动状态变化
+        local wasMoving = isMoving
+        isMoving = distance >= stopDetectionThreshold
+        
+        -- 当从移动状态变为静止状态时，创建停止效果
+        if wasMoving and not isMoving then
+            createStopEffect(currentPosition, charScale)
+        end
 
         if distance >= moveThreshold then
             trailCounter = trailCounter + 1
