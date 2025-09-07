@@ -1,0 +1,279 @@
+-- 新彩虹粒子系统 - 七色并排尾托带渐变和爆炸效果
+-- 远程加载版本
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local Debris = game:GetService("Debris")
+
+-- 初始化变量
+local player = Players.LocalPlayer
+getgenv().isNewRainbowActive = false  -- 新彩虹粒子开关状态
+local trailParts = {}             -- 存储尾托部件
+local trailConnection = nil       -- 渲染循环连接
+local character = player.Character
+
+-- 七种彩虹颜色（红橙黄绿蓝靛紫）
+local rainbowColors = {
+    Color3.fromRGB(255, 0, 0),     -- 红
+    Color3.fromRGB(255, 127, 0),   -- 橙
+    Color3.fromRGB(255, 255, 0),   -- 黄
+    Color3.fromRGB(0, 255, 0),     -- 绿
+    Color3.fromRGB(0, 0, 255),     -- 蓝
+    Color3.fromRGB(75, 0, 130),    -- 靛
+    Color3.fromRGB(148, 0, 211)    -- 紫
+}
+
+-- 创建单个尾托粒子（带渐变效果）
+local function createTrailParticle(position, colorIndex, scale, alpha)
+    local color = rainbowColors[colorIndex]
+    
+    local part = Instance.new("Part")
+    part.Name = "NewRainbowTrail_" .. player.Name .. "_" .. colorIndex
+    part.Size = Vector3.new(1.5, 1.5, 1.5) * scale
+    part.Material = Enum.Material.Neon
+    part.Color = color
+    part.Anchored = true
+    part.CanCollide = false
+    part.Shape = Enum.PartType.Ball
+    part.Position = position
+    part.Transparency = 1 - alpha  -- 渐变透明度
+    part.Parent = workspace
+
+    -- 发光效果
+    local pointLight = Instance.new("PointLight")
+    pointLight.Color = color
+    pointLight.Brightness = 2 * alpha
+    pointLight.Range = 8 * scale * alpha
+    pointLight.Parent = part
+
+    -- 粒子效果
+    local attachment = Instance.new("Attachment")
+    attachment.Parent = part
+    local particles = Instance.new("ParticleEmitter")
+    particles.Parent = attachment
+    particles.Color = ColorSequence.new(color)
+    particles.Size = NumberSequence.new{
+        NumberSequenceKeypoint.new(0, 0.2 * scale * alpha), 
+        NumberSequenceKeypoint.new(1, 0)
+    }
+    particles.Lifetime = NumberRange.new(0.3, 1.5)
+    particles.Rate = 30 * scale * alpha
+    particles.SpreadAngle = Vector2.new(30, 30)
+    particles.Speed = NumberRange.new(2 * scale, 6 * scale)
+    particles.EmissionDirection = Enum.NormalId.Top
+
+    return part
+end
+
+-- 创建粒子爆炸效果
+local function createExplosionEffect(position, scale)
+    for i = 1, #rainbowColors do
+        local color = rainbowColors[i]
+        
+        -- 创建爆炸粒子
+        local explosionPart = Instance.new("Part")
+        explosionPart.Name = "ExplosionParticle_" .. i
+        explosionPart.Size = Vector3.new(0.5, 0.5, 0.5) * scale
+        explosionPart.Material = Enum.Material.Neon
+        explosionPart.Color = color
+        explosionPart.Anchored = true
+        explosionPart.CanCollide = false
+        explosionPart.Shape = Enum.PartType.Ball
+        explosionPart.Position = position
+        explosionPart.Parent = workspace
+        
+        -- 爆炸粒子效果
+        local attachment = Instance.new("Attachment")
+        attachment.Parent = explosionPart
+        local particles = Instance.new("ParticleEmitter")
+        particles.Parent = attachment
+        particles.Color = ColorSequence.new(color)
+        particles.Size = NumberSequence.new{
+            NumberSequenceKeypoint.new(0, 0.5 * scale), 
+            NumberSequenceKeypoint.new(0.5, 0.8 * scale),
+            NumberSequenceKeypoint.new(1, 0)
+        }
+        particles.Lifetime = NumberRange.new(0.5, 2)
+        particles.Rate = 100
+        particles.SpreadAngle = Vector2.new(180, 180)
+        particles.Speed = NumberRange.new(8 * scale, 15 * scale)
+        particles.EmissionDirection = Enum.NormalId.Top
+        
+        -- 爆炸动画
+        local explosionTween = TweenService:Create(explosionPart, TweenInfo.new(1, Enum.EasingStyle.Quad), {
+            Transparency = 1,
+            Size = Vector3.new(2, 2, 2) * scale
+        })
+        explosionTween:Play()
+        
+        -- 停止粒子发射并清理
+        task.delay(0.2, function()
+            particles.Enabled = false
+        end)
+        
+        task.delay(2, function()
+            if explosionPart then explosionPart:Destroy() end
+        end)
+    end
+end
+
+-- 创建七色并排尾托
+local function createRainbowTrail(centerPosition, scale)
+    local trailGroup = {}
+    local spacing = 1.2 * scale  -- 颜色间距
+    
+    -- 计算角色朝向（用于排列方向）
+    local humanoidRootPart = character and character:FindFirstChild("HumanoidRootPart")
+    local lookDirection = humanoidRootPart and humanoidRootPart.CFrame.LookVector or Vector3.new(0, 0, -1)
+    local rightDirection = lookDirection:Cross(Vector3.new(0, 1, 0)).Unit
+    
+    -- 创建七个颜色的粒子，从左到右排列
+    for i = 1, #rainbowColors do
+        local offset = rightDirection * ((i - 4) * spacing)  -- 以中心为基准左右排列
+        local particlePosition = centerPosition + offset
+        
+        -- 渐变透明度：中间最亮，两边渐暗
+        local distanceFromCenter = math.abs(i - 4)
+        local alpha = math.max(0.3, 1 - (distanceFromCenter * 0.15))
+        
+        local particle = createTrailParticle(particlePosition, i, scale, alpha)
+        table.insert(trailGroup, particle)
+        table.insert(trailParts, particle)
+        
+        -- 尾托消失动画
+        local fadeTween = TweenService:Create(particle, TweenInfo.new(3, Enum.EasingStyle.Quad), {
+            Transparency = 1,
+            Size = Vector3.new(0.1, 0.1, 0.1) * scale
+        })
+        fadeTween:Play()
+        
+        -- 在消失前创建爆炸效果
+        task.delay(2.5, function()
+            if particle and particle.Parent then
+                createExplosionEffect(particle.Position, scale * 0.5)
+            end
+        end)
+        
+        -- 清理粒子
+        fadeTween.Completed:Connect(function()
+            if particle then particle:Destroy() end
+            for j, p in ipairs(trailParts) do
+                if p == particle then
+                    table.remove(trailParts, j)
+                    break
+                end
+            end
+        end)
+    end
+    
+    return trailGroup
+end
+
+-- 清理所有尾托
+local function clearNewRainbowTrail()
+    for _, part in ipairs(trailParts) do
+        if part then part:Destroy() end
+    end
+    trailParts = {}
+end
+
+-- 开始新彩虹粒子系统
+local function startNewRainbowTrail()
+    if trailConnection or not character then return end
+    
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then
+        warn("角色无根部件，无法开启新彩虹粒子")
+        return
+    end
+    
+    local lastPosition = humanoidRootPart.Position
+    local trailCounter = 0
+    
+    trailConnection = RunService.RenderStepped:Connect(function()
+        if not character or not character:FindFirstChild("HumanoidRootPart") or not getgenv().isNewRainbowActive then
+            stopNewRainbowTrail()
+            return
+        end
+
+        local currentRootPart = character.HumanoidRootPart
+        local baseRootSize = 2
+        local rawCharScale = currentRootPart.Size.X / baseRootSize
+        rawCharScale = rawCharScale < 0.1 and 1 or rawCharScale
+        local maxScale = 5
+        local charScale = math.min(rawCharScale, maxScale)
+
+        local currentPosition = currentRootPart.Position
+        local distance = (currentPosition - lastPosition).Magnitude
+        local moveThreshold = 0.8 * charScale
+
+        if distance >= moveThreshold then
+            trailCounter = trailCounter + 1
+            
+            -- 每隔几帧创建一组尾托，避免过于密集
+            if trailCounter % 3 == 0 then
+                createRainbowTrail(lastPosition, charScale)
+            end
+            
+            lastPosition = currentPosition
+        end
+    end)
+
+    -- 加入清理列表
+    if getgenv().cleanupList and getgenv().cleanupList.connections then
+        table.insert(getgenv().cleanupList.connections, trailConnection)
+    end
+end
+
+-- 停止新彩虹粒子系统
+local function stopNewRainbowTrail()
+    if trailConnection and trailConnection.Connected then
+        trailConnection:Disconnect()
+        trailConnection = nil
+    end
+
+    -- 快速清理现有尾托
+    for _, part in ipairs(trailParts) do
+        if part and part.Parent then
+            TweenService:Create(part, TweenInfo.new(0.5), {
+                Transparency = 1,
+                Size = Vector3.new(0.1, 0.1, 0.1)
+            }):Play()
+            task.delay(0.5, function() if part then part:Destroy() end end)
+        end
+    end
+    trailParts = {}
+end
+
+-- 切换新彩虹粒子状态
+local function toggleNewRainbowTrail()
+    getgenv().isNewRainbowActive = not getgenv().isNewRainbowActive
+    if getgenv().isNewRainbowActive and character then
+        startNewRainbowTrail()
+        print("[新彩虹粒子] 已开启")
+    else
+        stopNewRainbowTrail()
+        print("[新彩虹粒子] 已关闭")
+    end
+end
+
+-- 暴露全局控制函数
+getgenv().toggleNewRainbowTrail = toggleNewRainbowTrail
+getgenv().stopNewRainbowTrail = stopNewRainbowTrail
+
+-- 初始化（默认关闭状态）
+print("[新彩虹粒子系统] 已加载，使用按钮或 getgenv().toggleNewRainbowTrail() 来切换开关")
+
+-- 角色重生时重新获取角色引用
+player.CharacterAdded:Connect(function(newCharacter)
+    character = newCharacter
+    -- 如果粒子系统正在运行，重新启动
+    if getgenv().isNewRainbowActive then
+        task.wait(1)  -- 等待角色完全加载
+        if trailConnection then
+            trailConnection:Disconnect()
+            trailConnection = nil
+        end
+        startNewRainbowTrail()
+    end
+end)
