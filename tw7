@@ -39,8 +39,8 @@ end
 local function createIceExplosion(head)
     local explosion = Instance.new("Explosion")
     explosion.Position = head.Position
-    explosion.BlastRadius = 6
-    explosion.BlastPressure = 500000
+    explosion.BlastRadius = 30
+    explosion.BlastPressure = 900000
     explosion.ExplosionType = Enum.ExplosionType.NoCraters
     explosion.Visible = true
     explosion.Parent = workspace
