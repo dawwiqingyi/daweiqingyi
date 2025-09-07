@@ -1,0 +1,111 @@
+
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+
+-- 初始化变量
+local PARTICLE_NAME = "PolarIceParticle"
+local isIceParticleActive = false
+local currentEmitter = nil
+
+-- 创建极地冰粒子函数
+local function createIceParticle(head)
+    if head:FindFirstChild(PARTICLE_NAME) then
+        return head:FindFirstChild(PARTICLE_NAME)
+    end
+    
+    local emitter = Instance.new("ParticleEmitter")
+    emitter.Name = PARTICLE_NAME
+    emitter.Texture = "rbxassetid://243098098" -- 冰晶粒子贴图
+    emitter.Rate = 50
+    emitter.Lifetime = NumberRange.new(1, 2)
+    emitter.Speed = NumberRange.new(2, 5)
+    emitter.Size = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0.5), 
+        NumberSequenceKeypoint.new(1, 0)
+    })
+    -- 极地冰颜色：青色到紫色渐变
+    emitter.Color = ColorSequence.new(
+        Color3.fromRGB(0, 255, 255), 
+        Color3.fromRGB(255, 0, 255)
+    )
+    emitter.LightEmission = 0.8
+    emitter.Enabled = false
+    emitter.Parent = head
+    
+    return emitter
+end
+
+-- 爆炸效果函数
+local function createIceExplosion(head)
+    local explosion = Instance.new("Explosion")
+    explosion.Position = head.Position
+    explosion.BlastRadius = 6
+    explosion.BlastPressure = 500000
+    explosion.ExplosionType = Enum.ExplosionType.NoCraters
+    explosion.Visible = true
+    explosion.Parent = workspace
+    
+    -- 爆炸特效自动清理
+    game:GetService("Debris"):AddItem(explosion, 2)
+end
+
+-- 启动极地冰粒子
+local function startIceParticle()
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    local head = character:FindFirstChild("Head")
+    if not head then return end
+    
+    currentEmitter = createIceParticle(head)
+    currentEmitter.Enabled = true
+    isIceParticleActive = true
+end
+
+-- 停止极地冰粒子
+local function stopIceParticle()
+    if currentEmitter and currentEmitter.Parent then
+        -- 停止时产生爆炸效果
+        if isIceParticleActive then
+            createIceExplosion(currentEmitter.Parent)
+        end
+        currentEmitter.Enabled = false
+    end
+    isIceParticleActive = false
+end
+
+-- 切换极地冰粒子状态
+local function toggleIceParticle()
+    if isIceParticleActive then
+        stopIceParticle()
+    else
+        startIceParticle()
+    end
+end
+
+-- 角色重生时重新初始化
+local function onCharacterAdded(character)
+    local head = character:WaitForChild("Head")
+    
+    -- 如果之前是开启状态，重新开启
+    if isIceParticleActive then
+        task.wait(0.5) -- 等待角色完全加载
+        startIceParticle()
+    end
+end
+
+-- 初始化
+if LocalPlayer.Character then
+    onCharacterAdded(LocalPlayer.Character)
+end
+
+LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
+
+-- 暴露全局控制函数
+getgenv().toggleIceParticle = toggleIceParticle
+getgenv().startIceParticle = startIceParticle
+getgenv().stopIceParticle = stopIceParticle
+getgenv().isIceParticleActive = function() return isIceParticleActive end
+
+print("极地冰粒子系统已加载完成！")
+print("使用 getgenv().toggleIceParticle() 来切换粒子效果")
