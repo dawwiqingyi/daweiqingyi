@@ -1,12 +1,4 @@
-{
-   "version": "1.0", 
-   "users": { 
-     "123456789": { 
-       "name": "weidada5", 
-       "level": "admin" 
-     } 
-   }, 
-   "usernames": { 
-     "weidada5": true  
-   } 
+"usernames": {
+   "weidada5": true,
+   "玩家显示名": true
 }
