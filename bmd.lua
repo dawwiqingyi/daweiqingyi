@@ -4,7 +4,7 @@ return {
     description = "白名单配置文件 - 仅用户名验证",
     updated = "2024-01-15",
     usernames = {
-        ["weidada"] = true,
+        ["weidada5"] = true,
         ["得不到就毁受想要也只能干望着"] = true,
         ["ExampleUser1"] = true,
         ["ExampleUser2"] = true
