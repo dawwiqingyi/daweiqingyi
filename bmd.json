@@ -1,0 +1,13 @@
+json
+{
+  "version": "1.0",
+  "users": {
+    "123456789": {
+      "name": "weidada5",
+      "level": "admin"
+    }
+  },
+  "usernames": {
+    "PlayerName": true
+  }
+}
