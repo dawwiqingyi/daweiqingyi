@@ -1,13 +1,41 @@
-json
 {
   "version": "1.0",
+  "description": "吃吃世界Pro脚本白名单",
+  "last_updated": "2024-01-15",
   "users": {
     "123456789": {
       "name": "weidada5",
-      "level": "admin"
+      "display_name": "示例用户1",
+      "level": "admin",
+      "added_date": "2024-01-01",
+      "notes": "管理员用户"
+    },
+    "987654321": {
+      "name": "ExampleUser2",
+      "display_name": "示例用户2",
+      "level": "user",
+      "added_date": "2024-01-10",
+      "notes": "普通用户"
+    },
+    "555666777": {
+      "name": "TestPlayer",
+      "display_name": "测试玩家",
+      "level": "vip",
+      "added_date": "2024-01-15",
+      "notes": "VIP用户"
     }
   },
   "usernames": {
-    "PlayerName": true
+    "ExampleUser1": true,
+    "ExampleUser2": true,
+    "TestPlayer": true,
+    "示例用户1": true,
+    "示例用户2": true,
+    "测试玩家": true
+  },
+  "settings": {
+    "strict_mode": false,
+    "allow_display_name_auth": true,
+    "case_sensitive": false
   }
 }
