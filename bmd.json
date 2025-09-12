@@ -1,6 +1,13 @@
-"usernames": {
-   "weidada5": true,
-   "weidada5": true,
-    "weidada3": true,
-   "菜鸟": true
+{
+  "version": "1.0",
+  "users": {
+    "9446052492": {
+      "name": "weidada5",
+      "level": "user"
+    }
+  },
+  "usernames": {
+    "weidada5": true,
+    "得不到就毁受想要也只能干望着": true
+  }
 }
