@@ -1,17 +1,17 @@
 {
   "version": "1.0",
   "description": "白名单配置文件 - 用户名验证",
-  "updated": "2025-09-13",
+  "updated": "2024-01-15",
   "usernames": {
     "weidada5": true,
     "得不到就受着": true,
-    "ExampleUser1": true,
-    "ExampleUser2": true,
+    "smallfish8888": true,
+    "小鱼儿": true,
      "weidada3": true,
     "大卫": true,
-    "weidada": true,
-    "星空探索者": true,
-    "DragonSlayer": true,
+    "weidada9": true,
+    "gdhpy4": true,
+    "绿": true,
     "快乐玩家": true,
     "AdventureMaster": true,
     "梦幻骑士": true
