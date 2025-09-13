@@ -380,7 +380,7 @@ local titleLabel = Instance.new("TextLabel")
 titleLabel.Size = UDim2.new(1, -12, 0, 30)
 titleLabel.Position = UDim2.new(0, 6, 0, 0)
 titleLabel.BackgroundTransparency = 1
-titleLabel.Text = "吸附系统"
+titleLabel.Text = "玩家吸附系统"
 titleLabel.TextColor3 = Color3.fromRGB(255,255,255)
 titleLabel.TextScaled = true
 titleLabel.Font = Enum.Font.SourceSansBold
@@ -439,7 +439,7 @@ local detachCorner = Instance.new("UICorner")
 detachCorner.CornerRadius = UDim.new(0, 10)
 detachCorner.Parent = detachBtn
 
-
+-- 按钮逻辑（不变）
 attachBtn.MouseButton1Click:Connect(function()
     if selectedPlayer then
         local success = toggleAttach(true, selectedPlayer)
