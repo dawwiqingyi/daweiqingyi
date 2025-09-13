@@ -2,9 +2,10 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
-local UserInputService = game:GetService("UserInputService") 
+local UserInputService = game:GetService("UserInputService") -- 新增：用于全局输入处理
 local LocalPlayer = Players.LocalPlayer
 
+-- 吸附逻辑变量（不变）
 local isAttaching = false
 local targetPlayer = nil
 local attachConnection = nil
@@ -12,6 +13,7 @@ local maxAttachDistance = 5000
 local backOffset = 0
 local cleanupList = {connections = {}}
 
+-- 获取角色根部件（不变）
 local function getRoot()
     if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
         return LocalPlayer.Character.HumanoidRootPart
@@ -19,15 +21,17 @@ local function getRoot()
     return nil
 end
 
+-- 创建ScreenGui（不变）
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "PlayerAttachUI"
 screenGui.IgnoreGuiInset = true
 screenGui.ResetOnSpawn = false
 screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
+-- ====================== 主框架 ======================
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0.25, 0, 0.6, 0) 
-mainFrame.Position = UDim2.new(0.05, 0, 0.2, 0) 
+mainFrame.Size = UDim2.new(0.25, 0, 0.6, 0) -- 缩小宽度+加高高度
+mainFrame.Position = UDim2.new(0.05, 0, 0.2, 0) -- 初始位置
 mainFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 mainFrame.AnchorPoint = Vector2.new(0, 0)
 mainFrame.BorderSizePixel = 0
@@ -36,57 +40,67 @@ local mainCorner = Instance.new("UICorner")
 mainCorner.CornerRadius = UDim.new(0, 18)
 mainCorner.Parent = mainFrame
 
-local dragging = false 
-local dragStart = Vector2.new() 
-local startPos = mainFrame.Position 
-local isDraggingFromFrame = false 
+-- ====================== 拖动状态变量 ======================
+local dragging = false -- 是否处于拖动中
+local dragStart = Vector2.new() -- 拖动起始的鼠标/触摸位置（屏幕绝对坐标）
+local startPos = mainFrame.Position -- 拖动起始的UI位置（UDim2）
+local isDraggingFromFrame = false -- 是否从框架内开始拖动
 
+-- ====================== 拖动逻辑（兼容手机和PC） ======================
+-- 1. 开始拖动：鼠标按下/触摸开始时触发
 mainFrame.InputBegan:Connect(function(input)
-
+    -- 响应鼠标左键或触摸事件
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         dragging = true
         isDraggingFromFrame = true
-        dragStart = input.Position 
-        startPos = mainFrame.Position 
-
+        dragStart = input.Position -- 记录起始位置
+        startPos = mainFrame.Position -- 记录UI当前位置
+        -- 拖动时视觉反馈
         mainFrame.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
     end
 end)
 
+-- 2. 全局拖动处理（兼容手机触摸滑动出UI范围的情况）
 UserInputService.InputChanged:Connect(function(input)
     if dragging and isDraggingFromFrame then
-
+        -- 处理鼠标移动和触摸移动
         if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-
+            -- 计算位置偏移
             local delta = input.Position - dragStart
-
+            
+            -- 计算新位置
             local newXOffset = startPos.X.Offset + delta.X
             local newYOffset = startPos.Y.Offset + delta.Y
-
+            
+            -- 获取屏幕和UI尺寸
             local screenSize = screenGui.AbsoluteSize
             local uiSize = mainFrame.AbsoluteSize
-
+            
+            -- 边界限制（允许部分超出屏幕但保持可操作）
             newXOffset = math.max(-uiSize.X * 0.8, newXOffset)
             newXOffset = math.min(screenSize.X - uiSize.X * 0.2, newXOffset)
             newYOffset = math.max(-uiSize.Y * 0.5, newYOffset)
             newYOffset = math.min(screenSize.Y - uiSize.Y * 0.2, newYOffset)
-
+            
+            -- 应用新位置
             mainFrame.Position = UDim2.new(0, newXOffset, 0, newYOffset)
         end
     end
 end)
 
+-- 3. 全局拖动结束处理
 UserInputService.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         if dragging and isDraggingFromFrame then
             dragging = false
             isDraggingFromFrame = false
-
+            -- 恢复背景色
             mainFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
         end
     end
 end)
 
+-- 4. 框架内拖动结束处理（备用）
 mainFrame.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         if dragging then
@@ -97,10 +111,12 @@ mainFrame.InputEnded:Connect(function(input)
     end
 end)
 
+-- ====================== 原有UI元素（只保留最小化按钮） ======================
+-- 最小化按钮（调整位置到右上角，统一+号和-号大小）
 local minimizeBtn = Instance.new("TextButton")
-minimizeBtn.Size = UDim2.new(0, 25, 0, 25) 
+minimizeBtn.Size = UDim2.new(0, 25, 0, 25) -- 固定30x30像素，确保+号和-号大小一致
 minimizeBtn.AnchorPoint = Vector2.new(1, 0)
-minimizeBtn.Position = UDim2.new(1, -4, 0, 4) 
+minimizeBtn.Position = UDim2.new(1, -4, 0, 4) -- 原关闭按钮位置
 minimizeBtn.Text = "-"
 minimizeBtn.TextScaled = true
 minimizeBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
@@ -120,21 +136,25 @@ playerScroll.ScrollBarThickness = 6
 playerScroll.BorderSizePixel = 0
 playerScroll.Parent = mainFrame
 
+-- 存储玩家按钮（不变）
 local playerButtons = {}
-
+-- 当前选择的玩家（不变）
 local selectedPlayer = nil
-
+-- 最小化状态
 local isMinimized = false
 local originalSize = mainFrame.Size
 local originalPosition = mainFrame.Position
 
-local transparencyLevel = 0 
+-- 透明度状态
+local transparencyLevel = 0 -- 0=不透明, 1=50%透明, 2=90%透明
 local transparencyValues = {0, 0.5, 0.9}
 
+-- 透明度切换功能
 local function toggleTransparency()
     transparencyLevel = (transparencyLevel + 1) % 3
     local transparency = transparencyValues[transparencyLevel + 1]
-
+    
+    -- 递归设置所有UI元素的透明度
     local function setElementTransparency(element, alpha)
         if element:IsA("Frame") or element:IsA("TextButton") then
             if alpha == 0 then
@@ -149,81 +169,92 @@ local function toggleTransparency()
                 element.BackgroundTransparency = math.min(0.95, alpha)
             end
         end
-
+        
         if element:IsA("TextLabel") or element:IsA("TextButton") then
             element.TextTransparency = alpha
         end
-
+        
         if element:IsA("ImageLabel") then
             element.ImageTransparency = alpha
         end
-
+        
+        -- 递归处理子元素
         for _, child in pairs(element:GetChildren()) do
             if child:IsA("GuiObject") then
                 setElementTransparency(child, alpha)
             end
         end
     end
-
+    
+    -- 应用透明度到整个UI
     setElementTransparency(mainFrame, transparency)
 end
 
+-- 最小化功能（修改：底部按钮保持原大小，只显示两个玩家）
 local function toggleMinimize()
     if isMinimized then
-
+        -- 恢复到正常大小（最大化状态）
         isMinimized = false
         mainFrame.Size = originalSize
         minimizeBtn.Text = "-"
-
+        
+        -- 显示所有UI元素
         titleLabel.Visible = true
         playerScroll.Visible = true
-
+        
+        -- 恢复底部按钮框位置
         bottomFrame.Position = UDim2.new(0, 6, 1, -bottomFrameHeight - 6)
-
+        
+        -- 显示所有玩家按钮并恢复原始位置
         refreshPlayerList()
     else
-
+        -- 最小化状态
         isMinimized = true
         originalSize = mainFrame.Size
-        mainFrame.Size = UDim2.new(0.25, 0, 0.35, 0)  
+        mainFrame.Size = UDim2.new(0.25, 0, 0.35, 0)  -- 调整高度以容纳两个玩家和底部按钮
         minimizeBtn.Text = "+"
-
+        
+        -- 隐藏标题和玩家滚动区域
         titleLabel.Visible = false
         playerScroll.Visible = false
-
-        bottomFrame.Position = UDim2.new(0, 6, 1, -bottomFrameHeight - 6)  
-
+        
+        -- 底部按钮保持原始大小和位置（不变）
+        bottomFrame.Position = UDim2.new(0, 6, 1, -bottomFrameHeight - 6)  -- 调整位置适应新高度
+        
+        -- 显示前两个玩家按钮
         local visibleCount = 0
         for _, btn in pairs(playerButtons) do
             btn.Visible = false
         end
-
+        
+        -- 只显示前两个玩家
         for _, btn in pairs(playerButtons) do
             if visibleCount < 2 then
                 btn.Visible = true
-                btn.Position = UDim2.new(0.025, 0, 0, 35 + visibleCount * 33)  
-                btn.Size = UDim2.new(0.95, 0, 0, 30)  
+                btn.Position = UDim2.new(0.025, 0, 0, 35 + visibleCount * 33)  -- 垂直排列
+                btn.Size = UDim2.new(0.95, 0, 0, 30)  -- 保持原始大小
                 visibleCount = visibleCount + 1
             end
         end
     end
 end
 
+-- 背部吸附功能核心函数（不变）
 local function findNearestPlayer()
     local root = getRoot()
     if not root then return nil end
-
+    
     local myPosition = root.Position
     local nearestPlayer = nil
     local shortestDistance = maxAttachDistance
-
+    
     for _, otherPlayer in pairs(Players:GetPlayers()) do
         if otherPlayer ~= LocalPlayer 
            and otherPlayer.Character 
            and otherPlayer.Character:FindFirstChild("HumanoidRootPart")
            and otherPlayer.Character:FindFirstChildOfClass("Humanoid")
            and otherPlayer.Character.Humanoid.Health > 0 then
-
+            
             local otherRoot = otherPlayer.Character.HumanoidRootPart
             local distance = (otherRoot.Position - myPosition).Magnitude
             if distance < shortestDistance then
@@ -249,15 +280,15 @@ local function startAttaching(player)
     if not root then
         return false
     end
-
+    
     local target = player or findNearestPlayer()
     if not target then
         return false
     end
-
+    
     targetPlayer = target
     isAttaching = true
-
+    
     attachConnection = RunService.Heartbeat:Connect(function()
         if not targetPlayer 
            or not targetPlayer.Character 
@@ -266,25 +297,25 @@ local function startAttaching(player)
             stopAttaching()
             return
         end
-
+        
         local root = getRoot()
         if not root then
             stopAttaching()
             return
         end
-
+        
         local otherRoot = targetPlayer.Character.HumanoidRootPart
         local distance = (otherRoot.Position - root.Position).Magnitude
         if distance > maxAttachDistance then
             stopAttaching()
             return
         end
-
+        
         local targetCFrame = otherRoot.CFrame
         local offset = targetCFrame.LookVector * -backOffset
         local targetPosition = targetCFrame.Position + offset
         local newCFrame = CFrame.new(targetPosition, targetPosition + root.CFrame.LookVector)
-
+        
         local tweenInfo = TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
         local tween = TweenService:Create(root, tweenInfo, {CFrame = newCFrame})
         tween:Play()
@@ -302,6 +333,7 @@ local function toggleAttach(enabled, player)
     end
 end
 
+-- 创建玩家选择按钮（不变）
 local function refreshPlayerList()
     for _, btn in playerButtons do
         btn:Destroy()
@@ -343,10 +375,11 @@ local function refreshPlayerList()
             nameLabel.TextColor3 = Color3.fromRGB(255,255,255)
             nameLabel.TextXAlignment = Enum.TextXAlignment.Left
             nameLabel.TextScaled = false
-            nameLabel.TextSize = 13  
+            nameLabel.TextSize = 13  -- 自定义字体大小
             nameLabel.Font = Enum.Font.SourceSansSemibold
             nameLabel.Parent = btn
 
+            -- 存储玩家引用到按钮中，方便最小化时识别
             btn:SetAttribute("PlayerName", player.Name)
 
             btn.MouseButton1Click:Connect(function()
@@ -378,8 +411,9 @@ titleLabel.TextScaled = true
 titleLabel.Font = Enum.Font.SourceSansBold
 titleLabel.Parent = mainFrame
 
-local bottomButtonHeight = 30  
-local bottomFrameHeight = bottomButtonHeight + 0  
+-- 自定义底部按钮尺寸变量
+local bottomButtonHeight = 30  -- 底部按钮高度（像素）
+local bottomFrameHeight = bottomButtonHeight + 0  -- 底部框架高度（按钮高度+边距）
 
 local bottomFrame = Instance.new("Frame")
 bottomFrame.Size = UDim2.new(1, -12, 0, bottomFrameHeight)
@@ -401,6 +435,7 @@ local attachCorner = Instance.new("UICorner")
 attachCorner.CornerRadius = UDim.new(0, 10)
 attachCorner.Parent = attachBtn
 
+-- 透明度按钮
 local transparencyBtn = Instance.new("TextButton")
 transparencyBtn.Size = UDim2.new(0.2, -2, 0, bottomButtonHeight)
 transparencyBtn.Position = UDim2.new(0.4, 2, 0, 5)
@@ -429,6 +464,7 @@ local detachCorner = Instance.new("UICorner")
 detachCorner.CornerRadius = UDim.new(0, 10)
 detachCorner.Parent = detachBtn
 
+-- 按钮逻辑（不变）
 attachBtn.MouseButton1Click:Connect(function()
     if selectedPlayer then
         local success = toggleAttach(true, selectedPlayer)
@@ -445,12 +481,15 @@ detachBtn.MouseButton1Click:Connect(function()
     attachBtn.Text = "吸附"
 end)
 
+-- 透明度按钮点击事件
 transparencyBtn.MouseButton1Click:Connect(function()
     toggleTransparency()
 end)
 
+-- 最小化按钮点击事件
 minimizeBtn.MouseButton1Click:Connect(function()
     toggleMinimize()
 end)
 
+-- 默认显示UI（不变）
 screenGui.Enabled = true
