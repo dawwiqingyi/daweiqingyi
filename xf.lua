@@ -122,7 +122,7 @@ local originalPosition = mainFrame.Position
 
 -- 透明度状态
 local transparencyLevel = 0 -- 0=不透明, 1=50%透明, 2=90%透明
-local transparencyValues = {0.1, 0.5, 0.8}
+local transparencyValues = {0, 0.5, 0.8}
 
 -- 透明度切换功能
 local function toggleTransparency()
