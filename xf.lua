@@ -9,7 +9,7 @@ local LocalPlayer = Players.LocalPlayer
 local isAttaching = false
 local targetPlayer = nil
 local attachConnection = nil
-local maxAttachDistance = 999000
+local maxAttachDistance = 9999000
 local backOffset = 0.5
 local cleanupList = {connections = {}}
 
