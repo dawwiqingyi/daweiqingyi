@@ -103,8 +103,8 @@ minimizeCorner.CornerRadius = UDim.new(0, 12)
 minimizeCorner.Parent = minimizeBtn
 
 local playerScroll = Instance.new("ScrollingFrame")
-playerScroll.Size = UDim2.new(1, -12, 0.75, 0)
-playerScroll.Position = UDim2.new(0, 6, 0, 30)
+playerScroll.Size = UDim2.new(1, -12, 0.75, 0) -- 恢复原始高度
+playerScroll.Position = UDim2.new(0, 6, 0, 35) -- 直接紧贴标题下方
 playerScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 playerScroll.BackgroundTransparency = 1
 playerScroll.ScrollBarThickness = 6
@@ -165,54 +165,7 @@ local function toggleTransparency()
     setElementTransparency(mainFrame, transparency)
 end
 
--- 最小化功能（修改：底部按钮保持原大小，只显示两个玩家）
-local function toggleMinimize()
-    if isMinimized then
-        -- 恢复到正常大小（最大化状态）
-        isMinimized = false
-        mainFrame.Size = originalSize
-        minimizeBtn.Text = "-"
-        
-        -- 显示所有UI元素
-        titleLabel.Visible = true
-        playerScroll.Visible = true
-        
-        -- 恢复底部按钮框位置
-        bottomFrame.Position = UDim2.new(0, 6, 1, -bottomFrameHeight - 6)
-        
-        -- 显示所有玩家按钮并恢复原始位置
-        refreshPlayerList()
-    else
-        -- 最小化状态
-        isMinimized = true
-        originalSize = mainFrame.Size
-        mainFrame.Size = UDim2.new(0.22, 0, 0.22, 0)  -- 调整高度以容纳两个玩家和底部按钮
-        minimizeBtn.Text = "+"
-        
-        -- 隐藏标题和玩家滚动区域
-        titleLabel.Visible = false
-        playerScroll.Visible = false
-        
-        -- 底部按钮保持原始大小和位置（不变）
-        bottomFrame.Position = UDim2.new(0, 6, 1, -bottomFrameHeight - 6)  -- 调整位置适应新高度
-        
-        -- 显示前两个玩家按钮
-        local visibleCount = 0
-        for _, btn in pairs(playerButtons) do
-            btn.Visible = false
-        end
-        
-        -- 只显示前两个玩家
-        for _, btn in pairs(playerButtons) do
-            if visibleCount < 2 then
-                btn.Visible = true
-                btn.Position = UDim2.new(0.025, 0, 0, 35 + visibleCount * 33)  -- 垂直排列
-                btn.Size = UDim2.new(0.95, 0, 0, 30)  -- 保持原始大小
-                visibleCount = visibleCount + 1
-            end
-        end
-    end
-end
+-- 最小化功能将在UI元素创建后定义
 
 -- 背部吸附功能核心函数（不变）
 local function findNearestPlayer()
@@ -308,15 +261,26 @@ local function toggleAttach(enabled, player)
     end
 end
 
--- 创建玩家选择按钮（不变）
+-- 更新在线玩家状态显示
+-- 创建玩家选择按钮（添加无玩家提示）
 local function refreshPlayerList()
     for _, btn in playerButtons do
         btn:Destroy()
     end
     playerButtons = {}
+    
+    -- 清除之前的"暂无玩家"提示
+    local existingNoPlayerLabel = playerScroll:FindFirstChild("NoPlayerLabel")
+    if existingNoPlayerLabel then
+        existingNoPlayerLabel:Destroy()
+    end
+    
     local y = 0
+    local hasOtherPlayers = false
+    
     for _, player in Players:GetPlayers() do
         if player ~= LocalPlayer then
+            hasOtherPlayers = true
             local btn = Instance.new("TextButton")
             btn.Size = UDim2.new(0.95, 0, 0, 30)
             btn.Position = UDim2.new(0.025, 0, 0, y)
@@ -344,10 +308,10 @@ local function refreshPlayerList()
 
             local nameLabel = Instance.new("TextLabel")
             nameLabel.Size = UDim2.new(0, 60, 1, 0)
-            nameLabel.Position = UDim2.new(0, 32, 0, 0)
+            nameLabel.Position = UDim2.new(0, 26, 0, 0)
             nameLabel.BackgroundTransparency = 1
             nameLabel.Text = "  " .. player.DisplayName .. " (" .. player.Name .. ")"
-            nameLabel.TextColor3 = Color3.fromRGB(255,255,255)
+            nameLabel.TextColor3 = Color3.fromRGB(255, 255, 0) -- 改为黄色
             nameLabel.TextXAlignment = Enum.TextXAlignment.Left
             nameLabel.TextScaled = false
             nameLabel.TextSize = 13  -- 自定义字体大小
@@ -369,6 +333,24 @@ local function refreshPlayerList()
             y = y + 33
         end
     end
+    
+    -- 如果没有其他玩家，显示"暂无玩家"提示
+    if not hasOtherPlayers then
+        local noPlayerLabel = Instance.new("TextLabel")
+        noPlayerLabel.Name = "NoPlayerLabel"
+        noPlayerLabel.Size = UDim2.new(1, -12, 0, 30)
+        noPlayerLabel.Position = UDim2.new(0, 6, 0, 0)
+        noPlayerLabel.BackgroundTransparency = 1
+        noPlayerLabel.Text = "暂无其他玩家"
+        noPlayerLabel.TextColor3 = Color3.fromRGB(0, 255, 0) -- 绿色
+        noPlayerLabel.TextXAlignment = Enum.TextXAlignment.Center
+        noPlayerLabel.TextScaled = false
+        noPlayerLabel.TextSize = 13
+        noPlayerLabel.Font = Enum.Font.SourceSansSemibold
+        noPlayerLabel.Parent = playerScroll
+        y = 30
+    end
+    
     playerScroll.CanvasSize = UDim2.new(0, 0, 0, y)
 end
 
@@ -384,6 +366,7 @@ titleLabel.Text = "吸附系统"
 titleLabel.TextColor3 = Color3.fromRGB(255,255,255)
 titleLabel.TextScaled = true
 titleLabel.Font = Enum.Font.SourceSansBold
+titleLabel.TextSize = 10
 titleLabel.Parent = mainFrame
 
 -- 自定义底部按钮尺寸变量
@@ -460,6 +443,54 @@ end)
 transparencyBtn.MouseButton1Click:Connect(function()
     toggleTransparency()
 end)
+
+-- 最小化功能（修改：保持显示标题和玩家列表，只调整大小）
+local function toggleMinimize()
+    if isMinimized then
+        -- 恢复到正常大小（最大化状态）
+        isMinimized = false
+        mainFrame.Size = originalSize
+        minimizeBtn.Text = "-"
+        
+        -- 恢复playerScroll的大小和位置
+        playerScroll.Size = UDim2.new(1, -12, 0.75, 0)
+        playerScroll.Position = UDim2.new(0, 6, 0, 35)
+        
+        -- 恢复底部按钮框位置
+        bottomFrame.Position = UDim2.new(0, 6, 1, -bottomFrameHeight - 6)
+        
+        -- 刷新玩家列表以恢复正常布局
+        refreshPlayerList()
+    else
+        -- 最小化状态
+        isMinimized = true
+        originalSize = mainFrame.Size
+        mainFrame.Size = UDim2.new(0.22, 0, 0.3, 0)  -- 调整高度以容纳标题、两个玩家和底部按钮
+        minimizeBtn.Text = "+"
+        
+        -- 调整playerScroll的大小和位置以适应最小化状态
+        playerScroll.Size = UDim2.new(1, -12, 0, 66)  -- 固定高度容纳两个玩家按钮
+        playerScroll.Position = UDim2.new(0, 6, 0, 35)
+        
+        -- 调整底部按钮框位置适应新高度
+        bottomFrame.Position = UDim2.new(0, 6, 1, -bottomFrameHeight - 6)
+        
+        -- 只显示前两个玩家按钮
+        local visibleCount = 0
+        for _, btn in pairs(playerButtons) do
+            btn.Visible = false
+        end
+        
+        for _, btn in pairs(playerButtons) do
+            if visibleCount < 2 then
+                btn.Visible = true
+                btn.Position = UDim2.new(0.025, 0, 0, visibleCount * 33)
+                btn.Size = UDim2.new(0.95, 0, 0, 30)
+                visibleCount = visibleCount + 1
+            end
+        end
+    end
+end
 
 -- 最小化按钮点击事件
 minimizeBtn.MouseButton1Click:Connect(function()
