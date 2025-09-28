@@ -13,23 +13,10 @@ local maxAttachDistance = 9999000
 local backOffset = 0.5
 local cleanupList = {connections = {}}
 
--- 新增：反向吸附变量
-local isReverseAttaching = false
-local reverseTargetPlayer = nil
-local reverseAttachConnection = nil
-
 -- 获取角色根部件（不变）
 local function getRoot()
     if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
         return LocalPlayer.Character.HumanoidRootPart
-    end
-    return nil
-end
-
--- 新增：获取目标玩家的根部件
-local function getTargetRoot(player)
-    if player and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-        return player.Character.HumanoidRootPart
     end
     return nil
 end
@@ -216,16 +203,6 @@ local function stopAttaching()
     targetPlayer = nil
 end
 
--- 新增：停止反向吸附
-local function stopReverseAttaching()
-    if reverseAttachConnection and reverseAttachConnection.Connected then
-        reverseAttachConnection:Disconnect()
-        reverseAttachConnection = nil
-    end
-    isReverseAttaching = false
-    reverseTargetPlayer = nil
-end
-
 local function startAttaching(player)
     local root = getRoot()
     if not root then
@@ -275,72 +252,11 @@ local function startAttaching(player)
     return true
 end
 
--- 新增：开始反向吸附（将目标玩家吸附到自己身后）
-local function startReverseAttaching(player)
-    local root = getRoot()
-    if not root then
-        return false
-    end
-    
-    local target = player or findNearestPlayer()
-    if not target then
-        return false
-    end
-    
-    reverseTargetPlayer = target
-    isReverseAttaching = true
-    
-    reverseAttachConnection = RunService.Heartbeat:Connect(function()
-        if not reverseTargetPlayer 
-           or not reverseTargetPlayer.Character 
-           or not reverseTargetPlayer.Character:FindFirstChild("HumanoidRootPart")
-           or (reverseTargetPlayer.Character:FindFirstChildOfClass("Humanoid") and reverseTargetPlayer.Character.Humanoid.Health <= 0) then
-            stopReverseAttaching()
-            return
-        end
-        
-        local root = getRoot()
-        local targetRoot = getTargetRoot(reverseTargetPlayer)
-        if not root or not targetRoot then
-            stopReverseAttaching()
-            return
-        end
-        
-        local distance = (targetRoot.Position - root.Position).Magnitude
-        if distance > maxAttachDistance then
-            stopReverseAttaching()
-            return
-        end
-        
-        -- 反向吸附：将目标玩家移动到自己身后
-        local myCFrame = root.CFrame
-        local offset = myCFrame.LookVector * -backOffset
-        local targetPosition = myCFrame.Position + offset
-        local newCFrame = CFrame.new(targetPosition, targetPosition + targetRoot.CFrame.LookVector)
-        
-        local tweenInfo = TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-        local tween = TweenService:Create(targetRoot, tweenInfo, {CFrame = newCFrame})
-        tween:Play()
-    end)
-    table.insert(cleanupList.connections, reverseAttachConnection)
-    return true
-end
-
 local function toggleAttach(enabled, player)
     if enabled then
         return startAttaching(player)
     else
         stopAttaching()
-        return true
-    end
-end
-
--- 新增：反向吸附切换函数
-local function toggleReverseAttach(enabled, player)
-    if enabled then
-        return startReverseAttaching(player)
-    else
-        stopReverseAttaching()
         return true
     end
 end
@@ -464,7 +380,7 @@ bottomFrame.BackgroundTransparency = 1
 bottomFrame.Parent = mainFrame
 
 local attachBtn = Instance.new("TextButton")
-attachBtn.Size = UDim2.new(0.25, -2, 0, bottomButtonHeight)
+attachBtn.Size = UDim2.new(0.35, -2, 0, bottomButtonHeight)
 attachBtn.Position = UDim2.new(0, 0, 0, 5)
 attachBtn.Text = "吸附"
 attachBtn.TextScaled = true
@@ -477,25 +393,10 @@ local attachCorner = Instance.new("UICorner")
 attachCorner.CornerRadius = UDim.new(0, 10)
 attachCorner.Parent = attachBtn
 
--- 新增：反向吸附按钮
-local reverseAttachBtn = Instance.new("TextButton")
-reverseAttachBtn.Size = UDim2.new(0.25, -2, 0, bottomButtonHeight)
-reverseAttachBtn.Position = UDim2.new(0.25, 2, 0, 5)
-reverseAttachBtn.Text = "反向吸附"
-reverseAttachBtn.TextScaled = true
-reverseAttachBtn.BackgroundColor3 = Color3.fromRGB(180, 80, 180)
-reverseAttachBtn.TextColor3 = Color3.fromRGB(255,255,255)
-reverseAttachBtn.BorderSizePixel = 0
-reverseAttachBtn.Font = Enum.Font.SourceSansBold
-reverseAttachBtn.Parent = bottomFrame
-local reverseAttachCorner = Instance.new("UICorner")
-reverseAttachCorner.CornerRadius = UDim.new(0, 10)
-reverseAttachCorner.Parent = reverseAttachBtn
-
 -- 透明度按钮
 local transparencyBtn = Instance.new("TextButton")
-transparencyBtn.Size = UDim2.new(0.15, -2, 0, bottomButtonHeight)
-transparencyBtn.Position = UDim2.new(0.5, 2, 0, 5)
+transparencyBtn.Size = UDim2.new(0.2, -2, 0, bottomButtonHeight)
+transparencyBtn.Position = UDim2.new(0.4, 2, 0, 5)
 transparencyBtn.Text = "透"
 transparencyBtn.TextScaled = true
 transparencyBtn.BackgroundColor3 = Color3.fromRGB(120, 120, 120)
@@ -524,11 +425,6 @@ detachCorner.Parent = detachBtn
 -- 按钮逻辑（不变）
 attachBtn.MouseButton1Click:Connect(function()
     if selectedPlayer then
-        -- 停止反向吸附
-        stopReverseAttaching()
-        reverseAttachBtn.BackgroundColor3 = Color3.fromRGB(180, 80, 180)
-        reverseAttachBtn.Text = "反向吸附"
-        
         local success = toggleAttach(true, selectedPlayer)
         if success then
             attachBtn.BackgroundColor3 = Color3.fromRGB(40, 120, 40)
@@ -537,29 +433,10 @@ attachBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- 新增：反向吸附按钮逻辑
-reverseAttachBtn.MouseButton1Click:Connect(function()
-    if selectedPlayer then
-        -- 停止普通吸附
-        stopAttaching()
-        attachBtn.BackgroundColor3 = Color3.fromRGB(60, 180, 80)
-        attachBtn.Text = "吸附"
-        
-        local success = toggleReverseAttach(true, selectedPlayer)
-        if success then
-            reverseAttachBtn.BackgroundColor3 = Color3.fromRGB(120, 40, 120)
-            reverseAttachBtn.Text = "反向吸附中..."
-        end
-    end
-end)
-
 detachBtn.MouseButton1Click:Connect(function()
     toggleAttach(false)
-    toggleReverseAttach(false)
     attachBtn.BackgroundColor3 = Color3.fromRGB(60, 180, 80)
     attachBtn.Text = "吸附"
-    reverseAttachBtn.BackgroundColor3 = Color3.fromRGB(180, 80, 180)
-    reverseAttachBtn.Text = "反向吸附"
 end)
 
 -- 透明度按钮点击事件
