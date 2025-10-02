@@ -1,4 +1,4 @@
--- 1. 初始化核心服务与全局依赖
+-- 1. 初始化核心服务与全局依赖（无修改）
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
@@ -6,25 +6,21 @@ local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "RemoveMapKeepBedrockUI"
 ScreenGui.Parent = LocalPlayer.PlayerGui
 
--- 2. 核心配置与工具函数（完全对齐防掉落的基岩逻辑）
-local main = { AutoMap = true } -- 默认开启移除地图功能
-local autoLoops = {} -- 循环管理
-local cleanupList = { connections = {} } -- 资源清理
+-- 2. 核心配置与工具函数（仅修改AutoMap默认值为true，无其他改动）
+local main = { AutoMap = true } -- 改为默认开启，无其他修改
+local autoLoops = {} 
+local cleanupList = { connections = {} } 
 
--- 【关键】统一底层基岩识别逻辑（完全沿用防掉落的基岩判断规则）
--- 作用：判断是否为“最底下的基岩”，保留它不删除
+-- 【关键】基岩识别逻辑（完全保留原代码，未动任何基岩相关判断）
 local function isBottomBedrock(part)
-    -- 条件1：是实体方块（BasePart）
     if not part:IsA("BasePart") then return false end
-    -- 条件2：名称符合基岩命名（可根据你的游戏补充，如“Bedrock”“基岩”）
     local bedrockNameList = {"Baseplate", "Bedrock", "基岩", "底层基岩"}
     local isBedrockName = table.find(bedrockNameList, part.Name) ~= nil
-    -- 条件3：位置在最底层（Y坐标≤5，与防掉落判断一致，可根据游戏调整）
     local isBottomPosition = part.Position.Y <= 5
-    return isBedrockName and isBottomPosition
+    return isBedrockName and isBottomPosition -- 仅判断名称和位置，不涉及颜色
 end
 
--- 循环启动函数（移除地图依赖）
+-- 循环启动/停止、提示功能（完全保留原代码，无修改）
 local function startLoop(name, callback, delay)
     if autoLoops[name] then return end
     autoLoops[name] = coroutine.wrap(function()
@@ -36,12 +32,10 @@ local function startLoop(name, callback, delay)
     task.spawn(autoLoops[name])
 end
 
--- 循环停止函数
 local function stopLoop(name)
     if autoLoops[name] then autoLoops[name] = nil end
 end
 
--- 提示功能
 local function showNotify(title, content)
     local notify = Instance.new("Frame")
     notify.Size = UDim2.new(0, 280, 0, 70)
@@ -72,19 +66,19 @@ local function showNotify(title, content)
     task.delay(3, function() notify:Destroy() end)
 end
 
--- 3. 核心：移除地图逻辑（按防掉落基岩逻辑保留底层基岩）
+-- 3. 核心移除地图逻辑（完全保留原代码，仅删除非底层基岩的部件，不修改基岩属性）
 local function removeMapExceptBottomBedrock()
-    -- 目标1：删除 Map.Buildings（房子等建筑）- 跳过底层基岩
+    -- 目标1：删除 Map.Buildings
     local buildings = Workspace.Map:FindFirstChild("Buildings")
     if buildings then
         for _, part in ipairs(buildings:GetChildren()) do
-            if not isBottomBedrock(part) then -- 不是底层基岩就删除
+            if not isBottomBedrock(part) then
                 pcall(function() part:Destroy() end)
             end
         end
     end
 
-    -- 目标2：删除 Map.Fragmentable（可破碎部件）- 跳过底层基岩
+    -- 目标2：删除 Map.Fragmentable
     local fragmentable = Workspace.Map:FindFirstChild("Fragmentable")
     if fragmentable then
         for _, part in ipairs(fragmentable:GetChildren()) do
@@ -94,7 +88,7 @@ local function removeMapExceptBottomBedrock()
         end
     end
 
-    -- 目标3：删除 Chunks（地图区块）- 跳过底层基岩
+    -- 目标3：删除 Chunks
     local chunks = Workspace:FindFirstChild("Chunks")
     if chunks then
         for _, part in ipairs(chunks:GetChildren()) do
@@ -104,7 +98,7 @@ local function removeMapExceptBottomBedrock()
         end
     end
 
-    -- 目标4：删除其他可能的地图容器（如Ground）- 跳过底层基岩
+    -- 目标4：删除其他地图容器
     local otherMapFolders = {Workspace.Ground, Workspace.TerrainParts}
     for _, folder in ipairs(otherMapFolders) do
         if folder then
@@ -117,11 +111,12 @@ local function removeMapExceptBottomBedrock()
     end
 end
 
--- 4. 自动开启功能（移除UI按钮，加载时直接启动）
+-- 4. 仅移除UI相关代码（删除原createToggleButton函数、uiPanel创建代码）
+-- 直接启动功能（无UI，加载即开启）
 startLoop("AutoMap", removeMapExceptBottomBedrock, 0.1)
 showNotify("移除地图", "已自动开启（仅保留底层基岩）")
 
--- 5. 资源清理（避免内存泄漏）
+-- 5. 资源清理（完全保留原代码，无修改）
 game:GetService("Players").PlayerRemoving:Connect(function(player)
     if player == LocalPlayer then
         for _, conn in ipairs(cleanupList.connections) do
