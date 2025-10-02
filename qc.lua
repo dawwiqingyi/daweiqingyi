@@ -7,7 +7,7 @@ ScreenGui.Name = "RemoveMapKeepBedrockUI"
 ScreenGui.Parent = LocalPlayer.PlayerGui
 
 -- 2. 核心配置与工具函数（完全对齐防掉落的基岩逻辑）
-local main = { AutoMap = false } -- 移除地图开关
+local main = { AutoMap = true } -- 默认开启移除地图功能
 local autoLoops = {} -- 循环管理
 local cleanupList = { connections = {} } -- 资源清理
 
@@ -117,49 +117,10 @@ local function removeMapExceptBottomBedrock()
     end
 end
 
--- 4. 独立UI开关按钮（控制移除地图启停）
-local function createToggleButton(parent, title, x, y, callback)
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0, 140, 0, 35)
-    btn.Position = UDim2.new(0, x, 0, y)
-    btn.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
-    btn.Text = title
-    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    btn.TextSize = 14
-    btn.Parent = parent
-
-    local isEnabled = false
-    btn.MouseButton1Click:Connect(function()
-        isEnabled = not isEnabled
-        btn.BackgroundColor3 = isEnabled and Color3.fromRGB(0, 180, 70) or Color3.fromRGB(70, 70, 70)
-        btn.Text = isEnabled and title:gsub("%[关闭%]", "[开启]") or title:gsub("%[开启%]", "[关闭]")
-        callback(isEnabled)
-    end)
-    return btn
-end
-
--- 创建UI面板与按钮
-local uiPanel = Instance.new("Frame")
-uiPanel.Size = UDim2.new(0, 160, 0, 60)
-uiPanel.Position = UDim2.new(0.02, 0, 0.2, 0)
-uiPanel.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-uiPanel.BackgroundTransparency = 0.6
-uiPanel.BorderColor3 = Color3.fromRGB(180, 180, 180)
-uiPanel.BorderSizePixel = 1
-uiPanel.Parent = ScreenGui
-
-createToggleButton(uiPanel, "移除地图[留底层基岩] [关闭]", 10, 12, function(enabled)
-    main.AutoMap = enabled
-    if enabled then
-        -- 开启：启动移除循环，只删非底层基岩
-        startLoop("AutoMap", removeMapExceptBottomBedrock, 0.1)
-        showNotify("移除地图", "已开启（仅保留底层基岩）")
-    else
-        -- 关闭：停止循环
-        stopLoop("AutoMap")
-        showNotify("移除地图", "已关闭")
-    end
-end)
+-- 4. 自动启动功能
+-- 直接启动移除地图循环，无需UI按钮控制
+startLoop("AutoMap", removeMapExceptBottomBedrock, 0.1)
+showNotify("移除地图", "已自动开启（仅保留底层基岩）")
 
 -- 5. 资源清理（避免内存泄漏）
 game:GetService("Players").PlayerRemoving:Connect(function(player)
