@@ -1,4 +1,4 @@
--- 1. 初始化核心服务与全局依赖（移除StarterGui，无需通知相关服务）
+
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
@@ -6,12 +6,12 @@ local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "RemoveMapKeepBedrockUI"
 ScreenGui.Parent = LocalPlayer.PlayerGui
 
--- 2. 核心配置与工具函数（删除所有通知相关代码）
+
 local main = { AutoMap = true } -- 默认开启移除地图功能
 local autoLoops = {} 
-local cleanupList = { connections = {} } -- 仅保留连接清理，删除通知管理
+local cleanupList = { connections = {} } 
 
--- 【关键】基岩识别逻辑（完全保留原功能，无修改）
+
 local function isBottomBedrock(part)
     if not part:IsA("BasePart") then return false end
     local bedrockNameList = {"Baseplate", "Bedrock", "基岩", "底层基岩"}
@@ -20,7 +20,7 @@ local function isBottomBedrock(part)
     return isBedrockName and isBottomPosition
 end
 
--- 循环启动函数（无修改，保障功能运行）
+
 local function startLoop(name, callback, delay)
     if autoLoops[name] then return end
     autoLoops[name] = coroutine.wrap(function()
@@ -32,7 +32,7 @@ local function startLoop(name, callback, delay)
     task.spawn(autoLoops[name])
 end
 
--- 循环停止函数（无修改，用于资源清理）
+
 local function stopLoop(name)
     if autoLoops[name] then autoLoops[name] = nil end
 end
@@ -69,7 +69,7 @@ local function removeMapExceptBottomBedrock()
         end
     end
 
-    -- 目标4：删除其他地图容器
+    
     local otherMapFolders = {Workspace.Ground, Workspace.TerrainParts}
     for _, folder in ipairs(otherMapFolders) do
         if folder then
@@ -82,10 +82,10 @@ local function removeMapExceptBottomBedrock()
     end
 end
 
--- 4. 自动开启功能（仅启动核心逻辑，无任何文字通知）
+
 startLoop("AutoMap", removeMapExceptBottomBedrock, 0.1)
 
--- 5. 资源清理（简化通知相关清理，仅保留核心资源释放）
+
 game:GetService("Players").PlayerRemoving:Connect(function(player)
     if player == LocalPlayer then
         -- 清理连接
