@@ -117,8 +117,7 @@ local function removeMapExceptBottomBedrock()
     end
 end
 
--- 4. 自动启动功能
--- 直接启动移除地图循环，无需UI按钮控制
+-- 4. 自动开启功能（移除UI按钮，加载时直接启动）
 startLoop("AutoMap", removeMapExceptBottomBedrock, 0.1)
 showNotify("移除地图", "已自动开启（仅保留底层基岩）")
 
