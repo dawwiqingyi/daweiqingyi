@@ -1,0 +1,234 @@
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+-- 全局变量，用于UI控制
+getgenv().IceBreakParticle = getgenv().IceBreakParticle or {}
+
+-- 保存每个角色的粒子控制信息
+local characterParticleStates = {}
+
+local function createIceParticle(character)
+    local root = character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    
+    -- 创建脚部 Attachment
+    local footAttachment = root:FindFirstChild("IceFootAttachment")
+    if not footAttachment then
+        footAttachment = Instance.new("Attachment")
+        footAttachment.Name = "IceFootAttachment"
+        footAttachment.Position = Vector3.new(0, -2, 0) -- 脚下偏移
+        footAttachment.Parent = root
+    end
+
+    -- 冰霜粒子发射器参数
+    local particleConfigs = {
+        {
+            name = "IceRing",
+            texture = "rbxassetid://48374994",
+            color = ColorSequence.new{
+                ColorSequenceKeypoint.new(0, Color3.fromRGB(173,216,230)),  -- 浅蓝色
+                ColorSequenceKeypoint.new(0.5, Color3.fromRGB(135,206,250)), -- 天蓝色
+                ColorSequenceKeypoint.new(1, Color3.fromRGB(255,255,255))    -- 白色
+            },
+            lightEmission = 0.8,
+            size = NumberSequence.new{
+                NumberSequenceKeypoint.new(0, 6),
+                NumberSequenceKeypoint.new(0.5, 10),
+                NumberSequenceKeypoint.new(1, 4)
+            },
+            rate = 35,
+            lifetime = NumberRange.new(1.8, 2.8),
+            speed = NumberRange.new(5, 8),
+            acceleration = Vector3.new(0, 6, 0),
+            rotation = NumberRange.new(0, 360),
+            rotSpeed = NumberRange.new(40, 80),
+            transparency = NumberSequence.new{
+                NumberSequenceKeypoint.new(0, 0.3),
+                NumberSequenceKeypoint.new(0.7, 0.6),
+                NumberSequenceKeypoint.new(1, 1)
+            },
+            emissionDirection = Enum.NormalId.Top,
+            zOffset = 0.3,
+            spreadAngle = Vector2.new(360, 360),
+        },
+        {
+            name = "IceCrystals",
+            texture = "rbxassetid://296874871",
+            color = ColorSequence.new{
+                ColorSequenceKeypoint.new(0, Color3.fromRGB(176,224,230)),  -- 粉蓝色
+                ColorSequenceKeypoint.new(0.5, Color3.fromRGB(175,238,238)), -- 浅青色
+                ColorSequenceKeypoint.new(1, Color3.fromRGB(240,248,255))    -- 幽灵白
+            },
+            lightEmission = 0.6,
+            size = NumberSequence.new{
+                NumberSequenceKeypoint.new(0, 2.5),
+                NumberSequenceKeypoint.new(0.5, 5),
+                NumberSequenceKeypoint.new(1, 1.5)
+            },
+            rate = 60,
+            lifetime = NumberRange.new(1.5, 2.5),
+            speed = NumberRange.new(6, 12),
+            acceleration = Vector3.new(0, 8, 0),
+            rotation = NumberRange.new(0, 360),
+            rotSpeed = NumberRange.new(-60, 60),
+            transparency = NumberSequence.new{
+                NumberSequenceKeypoint.new(0, 0.2),
+                NumberSequenceKeypoint.new(0.6, 0.5),
+                NumberSequenceKeypoint.new(1, 0.9)
+            },
+            emissionDirection = Enum.NormalId.Top,
+            zOffset = 0.8,
+            spreadAngle = Vector2.new(90, 90),
+        },
+        {
+            name = "IceShards",
+            texture = "rbxassetid://242610973",
+            color = ColorSequence.new{
+                ColorSequenceKeypoint.new(0, Color3.fromRGB(224,255,255)),  -- 浅青色
+                ColorSequenceKeypoint.new(0.5, Color3.fromRGB(173,216,230)), -- 浅蓝色
+                ColorSequenceKeypoint.new(1, Color3.fromRGB(135,206,235))    -- 天蓝色
+            },
+            lightEmission = 0.9,
+            size = NumberSequence.new{
+                NumberSequenceKeypoint.new(0, 1.2),
+                NumberSequenceKeypoint.new(0.5, 3.5),
+                NumberSequenceKeypoint.new(1, 0.4)
+            },
+            rate = 45,
+            lifetime = NumberRange.new(1.2, 2.2),
+            speed = NumberRange.new(8, 15),
+            acceleration = Vector3.new(0, 12, 0),
+            rotation = NumberRange.new(0, 360),
+            rotSpeed = NumberRange.new(-120, 120),
+            transparency = NumberSequence.new{
+                NumberSequenceKeypoint.new(0, 0.1),
+                NumberSequenceKeypoint.new(0.7, 0.4),
+                NumberSequenceKeypoint.new(1, 0.8)
+            },
+            emissionDirection = Enum.NormalId.Top,
+            zOffset = 1.2,
+            spreadAngle = Vector2.new(45, 45),
+        }
+    }
+
+    -- 保存所有粒子发射器
+    local emitters = {}
+
+    for i, cfg in particleConfigs do
+        if not footAttachment:FindFirstChild(cfg.name) then
+            local emitter = Instance.new("ParticleEmitter")
+            emitter.Name = cfg.name
+            emitter.Texture = cfg.texture
+            emitter.Color = cfg.color
+            emitter.LightEmission = cfg.lightEmission
+            emitter.Size = cfg.size
+            emitter.Rate = cfg.rate
+            emitter.Lifetime = cfg.lifetime
+            emitter.Speed = cfg.speed
+            emitter.Acceleration = cfg.acceleration
+            emitter.Rotation = cfg.rotation
+            emitter.RotSpeed = cfg.rotSpeed
+            emitter.Transparency = cfg.transparency
+            emitter.EmissionDirection = cfg.emissionDirection
+            emitter.ZOffset = cfg.zOffset
+            emitter.SpreadAngle = cfg.spreadAngle
+            emitter.Enabled = true
+            emitter.Parent = footAttachment
+            emitters[cfg.name] = emitter
+        else
+            emitters[cfg.name] = footAttachment:FindFirstChild(cfg.name)
+        end
+    end
+
+    -- 运动检测循环
+    local running = true
+    local lastMoving = false
+    local normalRates = {IceRing = 35, IceCrystals = 60, IceShards = 45}
+    local idleRates = {IceRing = 7, IceCrystals = 12, IceShards = 9}
+
+    -- 如果已有旧循环，先关闭
+    if characterParticleStates[character] and characterParticleStates[character].disconnect then
+        characterParticleStates[character].disconnect()
+    end
+
+    -- 运动检测函数
+    local function updateRates()
+        if not running then return end
+        if not root.Parent then return end
+        local velocity = root.Velocity
+        local moving = (velocity.Magnitude > 1.5)
+        if moving ~= lastMoving then
+            lastMoving = moving
+            for name, emitter in emitters do
+                if emitter then
+                    emitter.Rate = moving and normalRates[name] or idleRates[name]
+                end
+            end
+        end
+    end
+
+    -- 循环检测
+    local stopped = false
+    local function loop()
+        while running and root.Parent and not stopped do
+            updateRates()
+            task.wait(0.25)
+        end
+    end
+
+    local loopThread = coroutine.create(loop)
+    coroutine.resume(loopThread)
+
+    -- 保存断开函数和发射器引用
+    characterParticleStates[character] = {
+        disconnect = function()
+            running = false
+            stopped = true
+        end,
+        emitters = emitters,
+        attachment = footAttachment
+    }
+end
+
+local function removeIceParticle(character)
+    local root = character:FindFirstChild("HumanoidRootPart")
+    if root then
+        local footAttachment = root:FindFirstChild("IceFootAttachment")
+        if footAttachment then
+            footAttachment:Destroy()
+        end
+    end
+    -- 停止运动检测循环
+    if characterParticleStates[character] and characterParticleStates[character].disconnect then
+        characterParticleStates[character].disconnect()
+    end
+    characterParticleStates[character] = nil
+end
+
+-- 全局控制函数，供UI调用
+getgenv().IceBreakParticle.Enabled = false
+getgenv().IceBreakParticle.CreateParticles = createIceParticle
+getgenv().IceBreakParticle.RemoveParticles = removeIceParticle
+
+-- 角色生成时的处理
+local function onCharacterAdded(character)
+    -- 等待角色完全加载
+    character:WaitForChild("HumanoidRootPart")
+    task.wait(1) -- 确保角色完全加载
+    
+    -- 如果粒子系统已启用，为新角色创建粒子
+    if getgenv().IceBreakParticle.Enabled then
+        createIceParticle(character)
+    end
+end
+
+-- 监听玩家角色生成
+local LocalPlayer = game.Players.LocalPlayer
+if LocalPlayer.Character then
+    onCharacterAdded(LocalPlayer.Character)
+end
+LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
+
+print("踏破寒冰粒子系统已加载 - 通过UI控制启用/禁用")
