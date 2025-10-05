@@ -7,7 +7,7 @@ ScreenGui.Name = "RemoveMapKeepBedrockUI"
 ScreenGui.Parent = LocalPlayer.PlayerGui
 
 
-local main = { AutoMap = true } -- 默认开启移除地图功能
+local main = { AutoMap = true } 
 local autoLoops = {} 
 local cleanupList = { connections = {} } 
 
@@ -37,7 +37,6 @@ local function stopLoop(name)
     if autoLoops[name] then autoLoops[name] = nil end
 end
 
--- 3. 核心：移除地图逻辑（完全保留原功能，无修改）
 local function removeMapExceptBottomBedrock()
     -- 目标1：删除 Map.Buildings
     local buildings = Workspace.Map:FindFirstChild("Buildings")
