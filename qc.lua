@@ -1,9 +1,8 @@
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
-local UserInputService = game:GetService("UserInputService") -- 新增：用于监听键盘输入
+local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 
--- 核心变量
 local hiddenMapContainer = Instance.new("Folder")
 hiddenMapContainer.Name = "HiddenMapStorage"
 hiddenMapContainer.Parent = game:GetService("ReplicatedStorage")
@@ -12,11 +11,9 @@ local targetMapObjects = {"Map", "Chunks"}
 local isMapVisible = true
 local tempAntiFallBedrock = nil
 
--- 提前声明函数
 local createTempBedrock, clearTempBedrock, alignCharToBedrock, pullCharToGround
 local getRespawnPosition
 
--- 1. 重生位置计算（用于拉回地面）
 function getRespawnPosition()
     local baseplate = Workspace:FindFirstChild("Baseplate")
     if baseplate then
@@ -26,7 +23,6 @@ function getRespawnPosition()
     end
 end
 
--- 2. 原基岩判断
 local function isOriginalBottomBedrock(part)
     if not part:IsA("BasePart") then return false end
     local bedrockNames = {"Baseplate", "Bedrock", "基岩", "底层基岩"}
@@ -35,7 +31,6 @@ local function isOriginalBottomBedrock(part)
     return isBedrock and isBottom
 end
 
--- 3. 临时基岩管理
 function createTempBedrock()
     if tempAntiFallBedrock and tempAntiFallBedrock.Parent then return end
     local bedrock = Instance.new("Part")
@@ -56,7 +51,6 @@ function clearTempBedrock()
     end
 end
 
--- 4. 隐藏地图时对齐基岩
 function alignCharToBedrock()
     local char = LocalPlayer.Character
     local root = char and char:FindFirstChild("HumanoidRootPart")
@@ -76,21 +70,19 @@ function alignCharToBedrock()
     root.CFrame = CFrame.new(root.Position.X, bedrockTop + hum.HipHeight + 2, root.Position.Z)
 end
 
--- 5. 显示地图时拉回地面
 function pullCharToGround()
     local char = LocalPlayer.Character
     local root = char and char:FindFirstChild("HumanoidRootPart")
     local humanoid = char and char:FindFirstChildOfClass("Humanoid")
     if not (root and humanoid and humanoid.Health > 0) then return end
 
-    task.wait(0.3)  -- 等待地图加载
+    task.wait(0.3)
     local respawnPos, baseplateY = getRespawnPosition()
     local newPos = Vector3.new(root.Position.X, baseplateY + 40, root.Position.Z)
     root.CFrame = CFrame.new(newPos)
     humanoid:ChangeState(Enum.HumanoidStateType.Landed)
 end
 
--- 6. 隐藏地图逻辑
 local function hideMapWithOriginalBedrock()
     for _, objName in ipairs(targetMapObjects) do
         local mapObj = Workspace:FindFirstChild(objName)
@@ -118,7 +110,6 @@ local function hideMapWithOriginalBedrock()
     alignCharToBedrock()
 end
 
--- 7. 显示地图逻辑
 local function showMapAsOriginal()
     for _, objName in ipairs(targetMapObjects) do
         local mapObj = hiddenMapContainer:FindFirstChild(objName)
@@ -128,10 +119,9 @@ local function showMapAsOriginal()
     end
 
     clearTempBedrock()
-    pullCharToGround()  -- 显示后拉回地面
+    pullCharToGround()
 end
 
--- 8. 地图切换逻辑
 local function toggleMapState(newVisible)
     isMapVisible = newVisible
     if newVisible then
@@ -141,24 +131,21 @@ local function toggleMapState(newVisible)
     end
 end
 
--- 9. 创建UI（仅保留地图切换按钮，调整为椭圆形、透明背景）
 local function createUI()
     local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "MapControlUI"
     screenGui.Parent = LocalPlayer.PlayerGui
 
-    -- 地图开关按钮
     local mapBtn = Instance.new("TextButton")
     mapBtn.Name = "MapSwitchBtn"
-    mapBtn.Size = UDim2.new(0, 60, 0, 30) -- 小尺寸，容下两字
-    mapBtn.Position = UDim2.new(0.5, -30, 0.83, -15) -- 底部居中
-    mapBtn.BackgroundTransparency = 0.8 -- 透明度90%
-    mapBtn.BackgroundColor3 = Color3.fromRGB(60, 179, 113) -- 绿色背景（透明后仍可见）
-    mapBtn.TextColor3 = Color3.fromRGB(0, 0, 0) -- 黑色文字更清晰
+    mapBtn.Size = UDim2.new(0, 60, 0, 30)
+    mapBtn.Position = UDim2.new(0.5, -30, 0.83, -15)
+    mapBtn.BackgroundTransparency = 0.8
+    mapBtn.BackgroundColor3 = Color3.fromRGB(60, 179, 113)
+    mapBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
     mapBtn.Text = "显示F"
     mapBtn.Font = Enum.Font.SourceSansBold
     mapBtn.TextSize = 14
-    -- 设置为椭圆形
     mapBtn.ClipsDescendants = true
     local corner = Instance.new("UICorner")
     corner.CornerRadius = UDim.new(0.5, 0)
@@ -172,14 +159,11 @@ local function createUI()
     end)
 end
 
--- 10. 新增：F键快捷键监听逻辑
 local function setupFKeyShortcut()
     UserInputService.InputBegan:Connect(function(input, gameProcessed)
-        -- 仅响应F键，且不是游戏内已处理的输入（如聊天时按F）
         if not gameProcessed and input.KeyCode == Enum.KeyCode.F then
             local newVisible = not isMapVisible
             toggleMapState(newVisible)
-            -- 找到UI按钮并更新文字（和点击按钮效果一致）
             local mapBtn = LocalPlayer.PlayerGui:FindFirstChild("MapControlUI"):FindFirstChild("MapSwitchBtn")
             if mapBtn then
                 mapBtn.Text = newVisible and "显示F" or "隐藏F"
@@ -188,7 +172,6 @@ local function setupFKeyShortcut()
     end)
 end
 
--- 11. 角色重生处理
 LocalPlayer.CharacterAdded:Connect(function(newChar)
     task.wait(1)
     if not isMapVisible then
@@ -199,9 +182,8 @@ LocalPlayer.CharacterAdded:Connect(function(newChar)
     end
 end)
 
--- 12. 初始化与清理
 createUI()
-setupFKeyShortcut() -- 调用新增的快捷键监听函数
+setupFKeyShortcut()
 
 game:GetService("Players").PlayerRemoving:Connect(function(player)
     if player == LocalPlayer then
