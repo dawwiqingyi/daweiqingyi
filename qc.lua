@@ -1,3 +1,15 @@
+-- 新增1：加载前先检测标记，存在则直接终止（防止重复加载）
+local loadMarker = game:GetService("ReplicatedStorage"):FindFirstChild("MapControl_Loaded")
+if loadMarker then
+    warn("地图控制代码已加载，无需重复执行")
+    return -- 直接终止后续代码，避免重复创建UI、监听等
+end
+
+-- 新增2：首次加载时创建唯一标记（放在ReplicatedStorage，全局唯一）
+loadMarker = Instance.new("BoolValue")
+loadMarker.Name = "MapControl_Loaded"
+loadMarker.Parent = game:GetService("ReplicatedStorage")
+
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local UserInputService = game:GetService("UserInputService")
@@ -185,10 +197,14 @@ end)
 createUI()
 setupFKeyShortcut()
 
+-- 新增3：玩家离开时删除标记（可选，避免标记永久残留）
 game:GetService("Players").PlayerRemoving:Connect(function(player)
     if player == LocalPlayer then
         toggleMapState(true)
         hiddenMapContainer:Destroy()
         clearTempBedrock()
+        if loadMarker and loadMarker.Parent then
+            loadMarker:Destroy() -- 玩家离开后清除标记，下次重新进入可正常加载
+        end
     end
 end)
