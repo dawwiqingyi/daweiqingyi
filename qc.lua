@@ -143,12 +143,6 @@ end
 
 -- 9. 创建UI（仅保留地图切换按钮，调整为椭圆形、透明背景）
 local function createUI()
-    -- 新增：加载新UI前，删除旧的UI容器及所有子元素（清除旧逻辑）
-    local oldUI = LocalPlayer.PlayerGui:FindFirstChild("MapControlUI")
-    if oldUI then
-        oldUI:Destroy() -- 销毁旧UI，其关联的点击事件等逻辑会自动清除
-    end
-
     local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "MapControlUI"
     screenGui.Parent = LocalPlayer.PlayerGui
@@ -161,7 +155,7 @@ local function createUI()
     mapBtn.BackgroundTransparency = 0.8 -- 透明度90%
     mapBtn.BackgroundColor3 = Color3.fromRGB(60, 179, 113) -- 绿色背景（透明后仍可见）
     mapBtn.TextColor3 = Color3.fromRGB(0, 0, 0) -- 黑色文字更清晰
-    mapBtn.Text = "显示"
+    mapBtn.Text = "显示F"
     mapBtn.Font = Enum.Font.SourceSansBold
     mapBtn.TextSize = 14
     -- 设置为椭圆形
@@ -174,7 +168,7 @@ local function createUI()
     mapBtn.MouseButton1Click:Connect(function()
         local newVisible = not isMapVisible
         toggleMapState(newVisible)
-        mapBtn.Text = newVisible and "显示" or "隐藏"
+        mapBtn.Text = newVisible and "显示F" or "隐藏F"
     end)
 end
 
@@ -188,7 +182,7 @@ local function setupFKeyShortcut()
             -- 找到UI按钮并更新文字（和点击按钮效果一致）
             local mapBtn = LocalPlayer.PlayerGui:FindFirstChild("MapControlUI"):FindFirstChild("MapSwitchBtn")
             if mapBtn then
-                mapBtn.Text = newVisible and "显示" or "隐藏"
+                mapBtn.Text = newVisible and "显示F" or "隐藏F"
             end
         end
     end)
