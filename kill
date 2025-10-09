@@ -2,7 +2,7 @@ getgenv().ScriptAccessURL = "https://raw.githubusercontent.com/dawwiqingyi/dawei
 
 -- 通过网络加载并运行脚本
 local success, errorMsg = pcall(function()
-    local scriptContent = game:HttpGet("http://www.wyp8.top/roblox/ki")
+    local scriptContent = game:HttpGet("https://raw.githubusercontent.com/dawwiqingyi/daweiqingyi/refs/heads/main/ki")
     loadstring(scriptContent)()
 end)
 
