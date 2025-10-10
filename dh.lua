@@ -164,10 +164,11 @@ buttonlayout["Parent"] = buttoncontainer
 local oldbuttons = {}
 
 local animations = {
-	  {name = "测试", id = 1070012133, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	
 	{name = "California\nGirls", id = 124982597491660, speed = 1, timepos = 0, looped = true, freezeonend = false},
 	{name = "Helicopter", id = 95301257497525, speed = 1, timepos = 0, looped = true, freezeonend = false},
 	{name = "Helicopter 2", id = 122951149300674, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "测试", id = 1070012133, speed = 1, timepos = 0, looped = true, freezeonend = false},
 	{name = "Helicopter 3", id = 91257498644328, speed = 1, timepos = 0, looped = true, freezeonend = false},
 	{name = "Da Hood Dance", id = 108171959207138, speed = 1, timepos = 0, looped = true, freezeonend = false},
 	{name = "Da Hood Stomp", id = 115048845533448, speed = 1.4, timepos = 0, looped = true, freezeonend = false},
