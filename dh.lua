@@ -164,6 +164,7 @@ buttonlayout["Parent"] = buttoncontainer
 local oldbuttons = {}
 
 local animations = {
+	  {name = "测试", id = 1070012133, speed = 1, timepos = 0, looped = true, freezeonend = false},
 	{name = "California\nGirls", id = 124982597491660, speed = 1, timepos = 0, looped = true, freezeonend = false},
 	{name = "Helicopter", id = 95301257497525, speed = 1, timepos = 0, looped = true, freezeonend = false},
 	{name = "Helicopter 2", id = 122951149300674, speed = 1, timepos = 0, looped = true, freezeonend = false},
