@@ -1,234 +1,2297 @@
+if not game:IsLoaded() then game["Loaded"]:Wait() end
 
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
+local players = game:GetService("Players") -- 玩家服务
+local localplayer = players["LocalPlayer"] -- 本地玩家
+local marketplaceservice = game:GetService("MarketplaceService") -- 商城服务
+local httpservice = game:GetService("HttpService") -- HTTP服务
+local tweenService = game:GetService("TweenService") -- 用于动画（回弹/缩小效果）
+local userInputService = game:GetService("UserInputService") -- 输入服务（检测移动）
+local runService = game:GetService("RunService") -- 新增：用于移动检测与拖拽优化
 
--- 全局变量，用于UI控制
-getgenv().IceBreakParticle = getgenv().IceBreakParticle or {}
+-- 全局变量（新增拖拽相关全局变量，确保状态同步）
+local isDragging = false -- 是否正在拖拽（全局状态）
+local dragStartPos -- 拖拽起始位置（鼠标/触摸位置）
+local uiStartPos -- UI起始位置（主框架/图标位置）
+local oldButtons = {} -- 存储所有动作按钮（用于搜索过滤）
+local activeAnimations = {} -- 存储正在播放的动画轨道
+local walkTrack = nil -- 存储走路动画轨道（全局可访问）
+local currentStaticTrack = nil -- 存储当前播放的静态动作轨道
+local movementConnection = nil -- 存储移动检测连接（用于关闭时断开）
+local popupWindows = {} -- 存储弹出窗口（全局变量）
+-- 待机动画系统变量
+local idleTrack = nil -- 存储待机动画轨道
+local idleTimer = 0 -- 待机计时器
+local lastMovementTime = 0 -- 上次移动时间
+local isIdleActive = false -- 是否正在播放待机动画
+-- 跳跃动画系统变量
+local jumpTrack = nil -- 存储跳跃动画轨道
+local isJumpActive = false -- 是否正在播放跳跃动画
+local jumpConnection = nil -- 跳跃检测连接
+-- 位置保存变量
+local mainFramePosition = UDim2.new(0.35, 0, 0.3, 0) -- 主框架位置
+local minimizeIconPosition = UDim2.new(0.25, 30, 0.8, 0) -- 最小化图标位置（向下移动）
 
--- 保存每个角色的粒子控制信息
-local characterParticleStates = {}
+-- 点击音效函数
+local function clickSound()
+	local sound = Instance.new("Sound") 
+	sound["SoundId"] = "rbxassetid://87152549167464" -- 音效ID
+	sound["Parent"] = game["Workspace"] -- 父级设为工作区
+	sound["Volume"] = 1.2 -- 音量
+	sound["TimePosition"] = 0.1 -- 播放起始位置
+	sound:Play() -- 播放音效
+end
 
-local function createIceParticle(character)
-    local root = character:FindFirstChild("HumanoidRootPart")
-    if not root then return end
+-- 创建主界面UI
+local gui = Instance.new("ScreenGui")
+gui["Name"] = "AnimationPlayer" -- 界面名称：动画播放器
+gui["DisplayOrder"] = 999999 -- 设置UI显示在最上层，覆盖所有其他UI
+-- 区分工作室与游戏环境，设置UI父级
+if game:GetService("RunService"):IsStudio() then 
+    gui["Parent"] = localplayer:WaitForChild("PlayerGui") -- 工作室中，父级为玩家UI
+else 
+    gui["Parent"] = gethui and gethui() or game:GetService("CoreGui") -- 游戏中，父级为核心UI
+end
+gui["ResetOnSpawn"] = false -- 重生时不重置UI
+
+-- UI定位函数（让UI居中显示）
+local function setUIPosition(ui, width, height)
+	local screenWidth, screenHeight = workspace["CurrentCamera"]["ViewportSize"]["X"], workspace["CurrentCamera"]["ViewportSize"]["Y"]
+	local centerX, centerY = (screenWidth - width) / 2, (screenHeight - height) / 2 - 56
+	ui["Position"] = UDim2.new(0, centerX, 0, centerY) -- 设置UI位置
+end
+
+-- 1. 主框架：最大化320x240，最小化30x30（适配图标大小）
+local mainFrame = Instance.new("Frame")
+mainFrame["Size"] = UDim2.new(0, 320, 0, 240) -- 最大化尺寸
+mainFrame["Position"] = UDim2.new(0.35, 0, 0.3, 0) -- 初始位置
+setUIPosition(mainFrame, 320, 240) -- 调用定位函数，让框架居中
+mainFrame["BackgroundColor3"] = Color3.fromRGB(0, 0, 0) -- 改为黑色背景
+mainFrame["BorderSizePixel"] = 0 -- 无边框
+mainFrame["BackgroundTransparency"] = 0.8 -- 透明度：40%可见，更透明
+mainFrame["Parent"] = gui -- 父级设为主界面
+-- 主框架圆角（最小化时显示为圆形）
+local mainFrameCorner = Instance.new("UICorner")
+mainFrameCorner.CornerRadius = UDim.new(0, 12) -- 最大化圆角12px，最小化自动适配圆形
+mainFrameCorner.Parent = mainFrame
+
+-- 拖拽相关函数会在后面统一定义
+
+-- 更新拖拽位置的通用函数（支持两个独立UI元素）
+local function updateDragPosition(input)
+	if not isDragging then return end -- 非拖拽状态直接返回
+	local deltaPos = input["Position"] - dragStartPos -- 位置变化量
+	local newPosition = UDim2.new(
+		uiStartPos["X"]["Scale"], uiStartPos["X"]["Offset"] + deltaPos["X"],
+		uiStartPos["Y"]["Scale"], uiStartPos["Y"]["Offset"] + deltaPos["Y"]
+	)
+	
+	-- 根据当前状态更新对应的UI元素位置
+	if isMinimized then
+		minimizeIcon["Position"] = newPosition
+	else
+		mainFrame["Position"] = newPosition
+	end
+end
+
+-- 监听主框架输入开始（最大化时拖拽主框架）
+mainFrame["InputBegan"]:Connect(function(input)
+	if (input["UserInputType"] == Enum.UserInputType.MouseButton1 or input["UserInputType"] == Enum.UserInputType.Touch) then 
+		isDragging = true 
+		dragStartPos = input["Position"] 
+		uiStartPos = mainFrame["Position"] 
+		-- 监听输入结束，重置拖拽状态并保存位置
+		input["Changed"]:Connect(function()
+			if input["UserInputState"] == Enum.UserInputState.End then
+				isDragging = false 
+				-- 拖拽结束时，保存主框架的当前位置
+				mainFramePosition = mainFrame["Position"]
+			end
+		end)
+	end
+end)
+
+-- 延迟连接输入变化事件，确保所有函数都已定义
+local function connectInputEvents()
+	-- 监听输入变化（处理所有拖拽移动，包括最大化/最小化状态）
+	userInputService["InputChanged"]:Connect(function(input)
+		-- 处理拖拽
+		if (input["UserInputType"] == Enum.UserInputType.MouseMovement or input["UserInputType"] == Enum.UserInputType.Touch) then
+			updateDragPosition(input)
+		end
+		-- 处理键盘移动检测
+		if input.UserInputType == Enum.UserInputType.Keyboard then
+			checkMovementState()
+		end
+	end)
+	
+	-- 添加点击空白区域最小化功能
+	userInputService.InputBegan:Connect(function(input, gameProcessed)
+		if gameProcessed then return end
+		
+		-- 检查是否是鼠标左键点击
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			-- 获取鼠标位置
+			local mousePos = input.Position
+			local camera = workspace.CurrentCamera
+			local screenSize = camera.ViewportSize
+			
+			-- 转换为屏幕坐标
+			local screenX = mousePos.X / screenSize.X
+			local screenY = mousePos.Y / screenSize.Y
+			
+			-- 检查是否点击在主UI外部
+			local clickedOnUI = false
+			
+			-- 检查主框架
+			if mainFrame.Visible then
+				local framePos = mainFrame.AbsolutePosition
+				local frameSize = mainFrame.AbsoluteSize
+				local frameX1 = framePos.X / screenSize.X
+				local frameY1 = framePos.Y / screenSize.Y
+				local frameX2 = (framePos.X + frameSize.X) / screenSize.X
+				local frameY2 = (framePos.Y + frameSize.Y) / screenSize.Y
+				
+				if screenX >= frameX1 and screenX <= frameX2 and screenY >= frameY1 and screenY <= frameY2 then
+					clickedOnUI = true
+				end
+			end
+			
+			-- 检查弹窗
+			for windowId, window in pairs(popupWindows) do
+				if window and window.Parent and window.Visible then
+					local windowPos = window.AbsolutePosition
+					local windowSize = window.AbsoluteSize
+					local windowX1 = windowPos.X / screenSize.X
+					local windowY1 = windowPos.Y / screenSize.Y
+					local windowX2 = (windowPos.X + windowSize.X) / screenSize.X
+					local windowY2 = (windowPos.Y + windowSize.Y) / screenSize.Y
+					
+					if screenX >= windowX1 and screenX <= windowX2 and screenY >= windowY1 and screenY <= windowY2 then
+						clickedOnUI = true
+						break
+					end
+				end
+			end
+			
+			-- 检查最小化按钮
+			if newMinimizeIcon.Visible then
+				local iconPos = newMinimizeIcon.AbsolutePosition
+				local iconSize = newMinimizeIcon.AbsoluteSize
+				local iconX1 = iconPos.X / screenSize.X
+				local iconY1 = iconPos.Y / screenSize.Y
+				local iconX2 = (iconPos.X + iconSize.X) / screenSize.X
+				local iconY2 = (iconPos.Y + iconSize.Y) / screenSize.Y
+				
+				if screenX >= iconX1 and screenX <= iconX2 and screenY >= iconY1 and screenY <= iconY2 then
+					clickedOnUI = true
+				end
+			end
+			
+			-- 如果点击在UI外部，触发最小化
+			if not clickedOnUI and newMinimizeIcon.Text == "关闭" then
+				toggleNewMinimizeUI()
+			end
+		end
+	end)
+end
+
+-- 顶部栏：仅最大化显示，最小化隐藏
+local topBar = Instance.new("Frame")
+topBar["Size"] = UDim2.new(1, 0, 0, 28) 
+topBar["BackgroundColor3"] = Color3.fromRGB(0, 0, 0) -- 改为黑色背景，与主UI一致
+topBar["BorderSizePixel"] = 0 -- 无边框
+topBar["BackgroundTransparency"] = 0.8 -- 透明度：与主UI一致
+topBar["Parent"] = mainFrame -- 父级设为主框架
+-- 顶部栏圆角
+local topBarCorner = Instance.new("UICorner")
+topBarCorner.CornerRadius = UDim.new(0, 12) -- 圆角大小：12像素
+topBarCorner.Parent = topBar
+
+-- 新增：三个交互按钮的主题色（恢复为不同颜色）
+local INTERACTIVE_COLORS = {
+	button1 = Color3.fromRGB(255, 100, 100), -- 红色系
+	button2 = Color3.fromRGB(100, 255, 100), -- 绿色系
+	button3 = Color3.fromRGB(100, 100, 255)  -- 蓝色系
+}
+
+-- 主题色定义（天空蓝系，确保所有按钮风格统一）
+local THEME_COLORS = {
+	stop = Color3.fromRGB(70, 130, 180), -- 深天空蓝（停止按钮）
+	minimize = Color3.fromRGB(170, 119, 207), -- 中天空蓝（最小化按钮）
+	close = Color3.fromRGB(135, 206, 235) -- 浅天空蓝（关闭按钮）
+}
+
+-- 通用按钮创建函数（支持主题色，适配三个功能按钮）
+local function createButton(name, position, size, colorKey, text)
+	local button = Instance.new("TextButton")
+	button["Name"] = name -- 按钮名称
+	button["Size"] = size -- 按钮尺寸
+	button["Position"] = position -- 按钮位置
+	-- 支持两种颜色主题：THEME_COLORS 和 INTERACTIVE_COLORS
+	local color = THEME_COLORS[colorKey] or INTERACTIVE_COLORS[colorKey] or Color3.fromRGB(135, 206, 235)
+	button["BackgroundColor3"] = color -- 使用主题色
+	button["Text"] = text -- 按钮文本
+	button["TextColor3"] = Color3.fromRGB(255, 255, 255) -- 文本色：白色（更明亮）
+	button["TextSize"] = 14 -- 按钮字体大小
+	button["Font"] = Enum.Font.RobotoMono -- 字体：等宽字体
+	button["BorderSizePixel"] = 0 -- 无边框
+	button["BackgroundTransparency"] = 0.3 -- 透明度：30%可见，更透明
+	button["Parent"] = topBar -- 父级设为顶部栏
+	-- 按钮圆角
+	local btnCorner = Instance.new("UICorner")
+	btnCorner.CornerRadius = UDim.new(0, 6) -- 圆角大小：6像素
+	btnCorner.Parent = button
+
+	-- 按钮回弹效果（拖拽时禁用，避免视觉冲突）
+	button["MouseButton1Down"]:Connect(function()
+		if not isDragging then
+			tweenService:Create(button, TweenInfo.new(0.05), {
+				Size = UDim2.new(size.X.Scale, size.X.Offset * 0.9, size.Y.Scale, size.Y.Offset * 0.9)
+			}):Play()
+			clickSound() -- 播放点击音效
+		end
+	end)
+	button["MouseButton1Up"]:Connect(function()
+		if not isDragging then
+			tweenService:Create(button, TweenInfo.new(0.05), {
+				Size = size
+			}):Play()
+		end
+	end)
+	button["MouseLeave"]:Connect(function()
+		if not isDragging then
+			tweenService:Create(button, TweenInfo.new(0.05), {
+				Size = size
+			}):Play()
+		end
+	end)
+
+	return button -- 返回创建的按钮
+end
+
+-- 三个交互按钮已移动到滚动区域
+
+-- 标题：仅最大化显示，最小化隐藏
+local titleLabel = Instance.new("TextLabel")
+titleLabel["Size"] = UDim2.new(1, -200, 1, 0) -- 宽度预留200像素给右侧按钮
+titleLabel["Position"] = UDim2.new(0, 0, 0, 0) -- 居中显示
+titleLabel["BackgroundTransparency"] = 1 -- 背景完全透明
+titleLabel["Text"] = "私人定制_循环动画" -- 标题文本
+titleLabel["Font"] = Enum.Font.RobotoMono -- 字体：等宽字体
+titleLabel["TextXAlignment"] = Enum.TextXAlignment.Center -- 文本居中对齐
+titleLabel["TextColor3"] = Color3.new(1, 1, 1) -- 文本色：白色
+titleLabel["TextSize"] = 16 -- 标题字体大小
+titleLabel["Parent"] = topBar -- 父级设为顶部栏
+titleLabel["Visible"] = true -- 初始最大化状态，默认显示
+
+-- 为标题添加动态七彩渐变色效果
+local titleGradient = Instance.new("UIGradient")
+titleGradient.Color = ColorSequence.new{
+	ColorSequenceKeypoint.new(0.0, Color3.fromRGB(255, 0, 0)),     -- 红色
+	ColorSequenceKeypoint.new(0.16, Color3.fromRGB(255, 165, 0)),  -- 橙色
+	ColorSequenceKeypoint.new(0.33, Color3.fromRGB(255, 255, 0)),  -- 黄色
+	ColorSequenceKeypoint.new(0.5, Color3.fromRGB(0, 255, 0)),     -- 绿色
+	ColorSequenceKeypoint.new(0.66, Color3.fromRGB(0, 255, 255)),  -- 青色
+	ColorSequenceKeypoint.new(0.83, Color3.fromRGB(0, 0, 255)),    -- 蓝色
+	ColorSequenceKeypoint.new(1.0, Color3.fromRGB(128, 0, 128))    -- 紫色
+}
+titleGradient.Rotation = 0 -- 初始角度
+titleGradient.Parent = titleLabel
+
+-- 创建动态旋转效果
+local rotationSpeed = 2 -- 旋转速度（度/秒）
+local currentRotation = 0
+local rotationConnection
+
+local function updateTitleGradient()
+	currentRotation = (currentRotation + rotationSpeed) % 360
+	titleGradient.Rotation = currentRotation
+end
+
+-- 启动动态旋转
+rotationConnection = game:GetService("RunService").Heartbeat:Connect(updateTitleGradient)
+
+-- 搜索栏：仅最大化显示，最小化隐藏
+local searchBar = Instance.new("Frame")
+searchBar["Size"] = UDim2.new(1, 0, 0, 28) -- 宽度随主框架，高度固定28
+searchBar["Position"] = UDim2.new(0, 0, 0, 28) -- 位置：顶部栏下方
+searchBar["BackgroundColor3"] = Color3.fromRGB(0, 0, 0) -- 改为黑色背景，与主UI一致
+searchBar["BorderSizePixel"] = 0 -- 无边框
+searchBar["BackgroundTransparency"] = 0.8 -- 透明度：与主UI一致
+searchBar["Parent"] = mainFrame -- 父级设为主框架
+searchBar["Visible"] = true -- 初始最大化状态，默认显示
+-- 搜索栏圆角
+local searchBarCorner = Instance.new("UICorner")
+searchBarCorner.CornerRadius = UDim.new(0, 8) -- 圆角大小：8像素
+searchBarCorner.Parent = searchBar
+
+-- 搜索框：优化提示文本交互（点击后提示消失）
+local searchBox = Instance.new("TextBox")
+searchBox["Size"] = UDim2.new(1, -10, 0, 18) -- 缩小搜索框高度（左右留5像素边距）
+searchBox["Position"] = UDim2.new(0, 5, 0, 5) -- 位置：搜索栏内
+searchBox["BackgroundColor3"] = Color3.fromRGB(135, 206, 235) -- 天空蓝背景（与主题一致）
+searchBox["TextColor3"] = Color3.new(1, 1, 1) -- 文本色：白色
+searchBox["PlaceholderText"] = "搜索动画" -- 提示文本
+searchBox["PlaceholderColor3"] = Color3.fromRGB(220, 220, 220) -- 提示色：浅灰白（更醒目）
+searchBox["Text"] = "" -- 初始文本为空
+searchBox["TextSize"] = 14 -- 字体放大，更易识别
+searchBox["Font"] = Enum.Font.RobotoMono -- 字体：等宽字体
+searchBox["BorderSizePixel"] = 0 -- 无边框
+searchBox["BackgroundTransparency"] = 0.6 -- 透明度：40%可见，更透明
+searchBox["TextEditable"] = true -- 确保文本可编辑
+searchBox["ClearTextOnFocus"] = false -- 不在获得焦点时清空文本
+searchBox["Parent"] = searchBar -- 父级设为搜索栏
+searchBox["Visible"] = true -- 初始最大化状态，默认显示
+-- 搜索框圆角
+local searchBoxCorner = Instance.new("UICorner")
+searchBoxCorner.CornerRadius = UDim.new(0, 6) -- 圆角大小：6像素
+searchBoxCorner.Parent = searchBox
+
+-- 搜索框交互：点击消失提示，失焦恢复
+searchBox["Focused"]:Connect(function()
+	-- 当搜索框获得焦点时，清空提示文本，允许用户输入
+	if searchBox["Text"] == "" then
+		searchBox["PlaceholderText"] = ""
+	end
+end)
+searchBox["FocusLost"]:Connect(function(enterPressed)
+	-- 当搜索框失去焦点时，如果没有输入内容，恢复提示文本
+	if searchBox["Text"] == "" then
+		searchBox["PlaceholderText"] = "搜索动画"
+	end
+end)
+
+-- 修复3：右上角三个功能按钮改为动画包名字按钮，默认开启动作
+-- 全局变量：跟踪三个动画包的状态
+local walkAnimActive = true  -- 走路包默认开启
+local idleAnimActive = true  -- 待机包默认开启
+local jumpAnimActive = true  -- 跳跃包默认开启
+
+-- 1. 走路动画包按钮
+local walkButton = createButton(
+	"WalkButton", 
+	UDim2.new(1, -205, 0, 5), -- 最左边位置
+	UDim2.new(0, 50, 0, 18),  -- 尺寸：宽50，高18
+	"button1", 
+	"停止走路"  -- 默认显示"停止走路"，因为默认是开启状态
+)
+
+-- 2. 待机动画包按钮
+local idleButton = createButton(
+	"IdleButton", 
+	UDim2.new(1, -150, 0, 5), -- 中间位置
+	UDim2.new(0, 50, 0, 18),  -- 尺寸：宽50，高18
+	"button2", 
+	"停止待机"  -- 默认显示"停止待机"，因为默认是开启状态
+)
+
+-- 3. 跳跃动画包按钮
+local jumpButton = createButton(
+	"JumpButton", 
+	UDim2.new(1, -95, 0, 5), -- 右边位置
+	UDim2.new(0, 50, 0, 18),  -- 尺寸：宽50，高18
+	"button3", 
+	"停止跳跃"  -- 默认显示"停止跳跃"，因为默认是开启状态
+)
+
+-- 4. 停止所有动作按钮
+local stopAllButton = createButton(
+	"StopAllButton", 
+	UDim2.new(1, -40, 0, 5), -- 在关闭按钮左边
+	UDim2.new(0, 20, 0, 20),  -- 尺寸：宽20，高18
+	"stop", 
+	"■"  -- 停止符号
+)
+
+-- 5. 关闭按钮（保持原位置）
+local closeButton = createButton(
+	"CloseButton", 
+	UDim2.new(1, -19, 0, 5),  -- 位置：最右边
+	UDim2.new(0, 20, 0, 20),  -- 尺寸：18x18（正方形）
+	"close", 
+	"X"
+)
+
+-- 显示所有按钮
+walkButton["Visible"] = true
+idleButton["Visible"] = true
+jumpButton["Visible"] = true
+stopAllButton["Visible"] = true
+closeButton["Visible"] = true
+
+-- 突出显示三个动画包按钮名字颜色
+walkButton["TextColor3"] = Color3.fromRGB(255, 255, 0) -- 黄色，更突出
+idleButton["TextColor3"] = Color3.fromRGB(255, 255, 0) -- 黄色，更突出
+jumpButton["TextColor3"] = Color3.fromRGB(255, 255, 0) -- 黄色，更突出
+
+-- 注意：最小化图标按钮将在后面统一创建，避免重复定义
+
+-- 滚动框架：仅最大化显示，最小化隐藏
+local scrollFrame = Instance.new("ScrollingFrame")
+scrollFrame["Size"] = UDim2.new(1, 0, 0, 184) -- 最大化时尺寸
+scrollFrame["Position"] = UDim2.new(0, 0, 0, 56) -- 位置：顶部栏+搜索栏下方
+scrollFrame["CanvasSize"] = UDim2.new(0, 0, 0, 0) -- 初始画布大小
+scrollFrame["ScrollBarThickness"] = 0 -- 隐藏滚动条
+scrollFrame["BorderSizePixel"] = 0 -- 无边框
+scrollFrame["BackgroundTransparency"] = 1 -- 背景完全透明
+scrollFrame["BackgroundColor3"] = Color3.fromRGB(0, 0, 0) -- 改为黑色背景，与主UI一致
+scrollFrame["Parent"] = mainFrame -- 父级设为主框架
+scrollFrame["Visible"] = true -- 初始最大化状态，默认显示
+
+-- 按钮容器：仅最大化显示，最小化隐藏
+local buttonContainer = Instance.new("Frame")
+buttonContainer["Size"] = UDim2.new(1, 0, 1, 0) -- 尺寸与滚动框一致
+buttonContainer["Position"] = UDim2.new(0, 5, 0, 0) -- 位置：滚动框内左侧
+buttonContainer["BackgroundTransparency"] = 1 -- 背景完全透明
+buttonContainer["Parent"] = scrollFrame -- 父级设为滚动框架
+buttonContainer["Visible"] = true -- 初始最大化状态，默认显示
+
+-- 4. 动作按钮布局：仅最大化生效
+local buttonLayout = Instance.new("UIGridLayout")
+buttonLayout["CellPadding"] = UDim2.new(0, 2, 0, 2) -- 按钮间距：2像素
+buttonLayout["CellSize"] = UDim2.new(0, 75, 0, 45) -- 动作按钮尺寸75x45（适配四排布局）
+buttonLayout["SortOrder"] = Enum.SortOrder.LayoutOrder -- 按布局顺序排序
+buttonLayout["FillDirection"] = Enum.FillDirection.Horizontal -- 水平填充
+buttonLayout["HorizontalAlignment"] = Enum.HorizontalAlignment.Left -- 左对齐
+buttonLayout["VerticalAlignment"] = Enum.VerticalAlignment.Top -- 顶部对齐
+buttonLayout["Parent"] = buttonContainer -- 父级设为按钮容器
+
+-- 动画列表：包含动画名称、ID、速度、起始位置、是否循环、是否结束冻结（包含三个自定义交互按钮）
+local animations = {
+	-- 三个自定义交互按钮
+	{name = "走路动画包", id = 0, speed = 1, timepos = 0, looped = true, freezeonend = false, isCustom = true, customImage = "rbxthumb://type=Asset&id=13416449761&w=150&h=150"},
+	{name = "待机动画包", id = 0, speed = 1, timepos = 0, looped = true, freezeonend = false, isCustom = true, customImage = "rbxthumb://type=Asset&id=14159617527&w=150&h=150"},
+	{name = "跳跃动画包", id = 0, speed = 1, timepos = 0, looped = true, freezeonend = false, isCustom = true, customImage = "rbxthumb://type=Asset&id=14442160450&w=150&h=150"},
+	-- 原有动画数据
+	{name = "加州女孩", id = 124982597491660, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "直升机", id = 95301257497525, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "直升机 2", id = 122951149300674, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "直升机 3", id = 91257498644328, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "街区舞蹈", id = 108171959207138, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "街区跺脚", id = 115048845533448, speed = 1.4, timepos = 0, looped = true, freezeonend = false},
+	{name = "扑腾的鱼", id = 79075971527754, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "江南Style", id = 100531289776679, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "焦糖舞", id = 88315693621494, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "空中画圈", id = 94324173536622, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "左手比心", id = 110936682778213, speed = 0, timepos = 0, looped = true, freezeonend = false},
+	{name = "右手比心", id = 84671941093489, speed = 0, timepos = 0, looped = true, freezeonend = false},
+	{name = "数字67", id = 115439144505157, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "数字6", id = 115439144505157, speed = 0, timepos = 0.2, looped = false, freezeonend = false},
+	{name = "数字7", id = 115439144505157, speed = 0, timepos = 1.2, looped = false, freezeonend = false},
+	{name = "小狗动作", id = 78195344190486, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "MM2冥想", id = 86872878957632, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "默认舞蹈", id = 88455578674030, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "坐下", id = 97185364700038, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "哥萨克踢", id = 119264600441310, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "战斗姿势", id = 116763940575803, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "你是谁呀", id = 81389876138766, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "摇晃坐姿", id = 130995344283026, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "摇晃坐姿", id = 131836270858895, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "蠕虫舞", id = 90333292347820, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "蛇形动作", id = 98476854035224, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "彼得·格里芬死亡", id = 129787664584610, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "沃尔特场景", id = 113475147402830, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "可爱趴姿", id = 80754582835479, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "暗影迪奥姿势", id = 92266904563270, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "承太郎姿势", id = 122120443600865, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "JOJO姿势", id = 120629563851640, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "漂浮趴姿", id = 77840765435893, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "圣经级形象", id = 109873544976020, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "无头", id = 78837807518622, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "ME!ME!ME!", id = 103235915424832, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "飞机动作", id = 82135680487389, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "XavierSoBased", id = 90802740360125, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "中国风舞蹈", id = 131758838511368, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "背头动作", id = 74288964113793, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "汽车动作", id = 108747312576405, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "Beat Da Koto Nai", id = 93497729736287, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "坦克动作", id = 94915612757079, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "经典走姿", id = 107806791584829, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "怪异生物", id = 87025086742503, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "马桶人", id = 127154705636043, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "滚动哭包", id = 129699431093711, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "思考动作", id = 127088545449493, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "假死", id = 88130117312312, speed = 1, timepos = 0, looped = false, freezeonend = true},
+	{name = "Lace动作", id = 135611169366768, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "穿搭展示", id = 81176957565811, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "投降动作", id = 100537772865440, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "Assumptions", id = 91294374426630, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "格里迪舞", id = 121966805049108, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "接受失败", id = 78653596566468, speed = 1, timepos = 0, looped = true, freezeonend = true},
+	{name = "篮球转脑袋", id = 92854797386719, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "鹦鹉舞蹈", id = 101810746304426, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "中枪动作", id = 102691551292124, speed = 1, timepos = 0, looped = false, freezeonend = true},
+	{name = "布娃娃效果", id = 136224735234038, speed = 1, timepos = 0, looped = false, freezeonend = true},
+	{name = "伤心坐姿", id = 100798804992348, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "汽水动作", id = 105459130960429, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "比利弹跳", id = 137501135905857, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "Ballin舞蹈", id = 119242308765484, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "电钻动作", id = 91423662648449, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "怪物 Mash", id = 137883764619555, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "芙梦 plush", id = 107217181254431, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "魅力后空翻", id = 131205329995035, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "漂浮动作", id = 89523370947906, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "打招呼", id = 103041144411206, speed = 1, timepos = 0, looped = false, freezeonend = true},
+	{name = "附身动作", id = 90708290447388, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "（不雅词汇）", id = 98289978017308, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "银影侠", id = 100663712757148, speed = 0.8, timepos = 0, looped = true, freezeonend = false},
+	{name = "高大不明物体", id = 118864464720628, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "猫咪坐姿", id = 99424293618796, speed = 1, timepos = 0, looped = true, freezeonend = false},
+	{name = "黑闪", id = 104767795538635, speed = 1, timepos = 0, looped = true, freezeonend = false},
+    {name = "臀部摇摆", id = 10714364213, speed = 1, timepos = 0, looped = true, freezeonend = false},
+    {name = "地面摇滚", id = 10214314957, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "地面摇滚定格 - 汤米·希尔费格", id = 10214314957, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "街头漫步表情", id = 10713981723, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "鼓乐大师 - 皇家血液乐队", id = 10714070681, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "TWICE 娜琏元气律动", id = 13768941455, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "碎碎念表情", id = 10713986541, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "超级充能", id = 10478338114, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "摇滚起来表情", id = 10714403700, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "旋转", id = 10714293450, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "呜鸣加速（拟声）", id = 18526397037, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "兔子蹦跳表情", id = 10714004791, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "迷你金刚", id = 17000021306, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "胜利之舞", id = 15505456446, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "拳击出击表情", id = 10717116749, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "扭臀律动 - 扎拉·拉尔森", id = 10714364213, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "鼓乐独奏 - 皇家血液乐队", id = 10714074218, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "唰唰表情（拟声）", id = 10714349738, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "帕尼尼之舞 - 利尔·纳斯·X（LNX）", id = 10714394082, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "海豚舞表情", id = 10714068222, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "手臂扭转表情", id = 10713968716, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "眼镜蛇手臂 - 泰·维德斯", id = 10714022275, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "妮琪·米娜 这就是超级贝斯动作", id = 15571446961, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "开心", id = 10714352626, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "宝贝舞蹈", id = 10713983178, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "拉斯普京 – 波尼·M乐队", id = 114872820353992, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "汤米·韩国流行音乐麦克风掉落", id = 14024642130, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "顶级摇滚表情", id = 10714336041, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "梅·斯蒂芬斯 – 手臂波浪", id = 16584481352, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "胜利 - 24kGoldn（音乐人）", id = 10714171628, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "阿迪达斯社区动画包", id = 122150855457006, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "BLACKPINK 终止（Shut Down）- 第一部分", id = 14901306096, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "埃尔顿·约翰 - 摇滚起来", id = 11753474067, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "兔子蹦跳", id = 10714004791, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "高举挥手表情", id = 10714362852, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "桑巴舞", id = 10714386947, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "发抖表情", id = 10714379581, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "BLACKPINK 粉色毒液（Pink Venom）- 抓住他们 抓住他们 抓住他们", id = 14548619594, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "机器人梅根（M3GAN）", id = 125803725853577, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "难过表情", id = 10714392876, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "宝贝女王 - 空气吉他与滑跪", id = 14352335202, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "优雅达阵", id = 16302968986, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "Stray Kids 水上行走", id = 125064469983655, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "摇滚起来", id = 10714403700, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "博柏利绽放表情（Burberry Bloom）", id = 10714007154, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "英雄落地表情", id = 10714360164, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "gdmc（英文缩写，保留原名）", id = 13694101936, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "TWICE 什么是爱（What Is Love）", id = 13327655243, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "最棒表情", id = 10714349037, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "鼓乐大师皇家血液乐队表情", id = 10714070681, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "埃尔顿·约翰 - 心跳摇摆", id = 17748314784, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "无聊", id = 10713992055, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "招手表情", id = 10713984554, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "屈膝礼", id = 10714061912, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "Jacks（保留原名）", id = 10714375667, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "TWICE 感到特别（Feel Special）", id = 14899980745, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "害羞", id = 10714369325, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "乔尼 - 跺脚", id = 16392075853, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "时尚攀爬", id = 10921271391, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "佳仁（Gashina）- 宣美", id = 9527886709, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "空气吉他", id = 10713959108, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "老城之路舞蹈利尔·纳斯·X表情（Old Town Road）", id = 10714391240, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "奥利维亚·罗德里戈 回落漂浮", id = 15549124879, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "鼓手动作 - 二十一名飞行员乐队", id = 10714072822, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "指挥家 - 乔治·埃兹拉", id = 10370359115, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "天鹅舞表情", id = 10714352930, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "hh2（英文缩写，保留原名）", id = 14851541605, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "阿迪达斯社区动画包", id = 98600215928904, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "博罗克斯愤怒表情（Borocks Rage）", id = 10713999630, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "耸肩", id = 10714374484, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "埃尔顿·约翰 - 心跳跳跃", id = 11309255148, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "BLACKPINK 丽莎 金钱（Money）", id = 15679623052, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "周六舞蹈表情", id = 10714382522, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "超高速5G舞蹈动作", id = 10714371264, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "空气吉他动作（Emote_AirGuitar）", id = 10713959108, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "体育场表情", id = 10714356920, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "宝贝女王 - 脸部框架动作", id = 14352340648, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "美国队霹雳舞动作", id = 18526288497, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "狂热舞蹈表情", id = 10714369624, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "thhsv3（英文缩写，保留原名）", id = 14109772540, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "宝贝（bby，英文缩写）", id = 14851544078, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "猴子", id = 10714388352, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "BLACKPINK 好像最后一次（As If It's Your Last）", id = 18855536648, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "梅根的舞蹈（M3GAN's Dance）", id = 99649534578309, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "超越自我 - 烟鬼组合", id = 12992262118, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "体育场", id = 10714356920, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "不是我的错 - 扎拉·拉尔森", id = 10714374267, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "顶级摇滚 - 测试（TopRock - Test）", id = 3058460854, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "高举双手表情", id = 10714361543, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "还好（AOK）- 泰·维德斯", id = 10713962506, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "TWICE 哦啊（Like Ooh-Ahh）", id = 14123781004, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "机器人", id = 10714392151, speed = 1, timepos = 0, looped = true, freezeonend = false},
+ 
+
+
+
+{name = "埃尔顿·约翰 - 升华", id = 11394033602, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "假日舞蹈利尔·纳斯·X表情（LNX）", id = 10714365721, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "弗洛斯舞蹈（Floss Dance，流行舞蹈名称）", id = 10714340543, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "空中舞蹈", id = 10713957138, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "滚石乐队吉他扫弦", id = 18148804340, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "离开表情", id = 10714345862, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "Alo瑜伽姿势 - 莲花坐", id = 12507085924, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "库科 - 漂浮（Levitate）", id = 15698404340, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "奥利维亚·罗德里戈 - 祝你安好（good 4 u）", id = 15517862739, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "hh1（英文缩写，保留原名）", id = 14851539444, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "NBA怪兽扣篮", id = 132748833449150, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "杰克表情（Jacks）", id = 10714375667, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "TWICE 击倒第一部分 - 来自韩国流行音乐恶魔猎手", id = 140182843839424, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "BLACKPINK 嘟嘟嘟（DDU-DU DDU-DU）", id = 16553170471, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "宝贝舞蹈表情", id = 10713983178, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "侧手翻 - 乔治·埃兹拉", id = 10370351535, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "Alo瑜伽姿势 - 战士二式", id = 12507083048, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "偶像（Idol）", id = 10714372526, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "大声点（Louder）", id = 10714385204, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "左右摇摆表情", id = 10714366910, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "钓鱼表情", id = 10714101749, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "恰恰舞表情（Cha Cha）", id = 10714018192, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "发脾气（Tantrum）", id = 10714340558, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "同意表情", id = 10713954623, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "TWICE 我抓住你了 第二部分（I GOT YOU part 2）", id = 16256203246, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "阿迪达斯社区动画包", id = 133308483266208, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "TWICE 喜欢你（LIKEY）", id = 14899979575, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "疯狂（MANIAC）- Stray Kids", id = 11309304959, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "发脾气表情", id = 10714340558, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "树木表情", id = 10714330764, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "最棒（Greatest）", id = 10714349037, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "扎布（The Zabb，保留原名）", id = 129470135909814, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "街区派对达人表情", id = 10713988674, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "倾斜（Tilt）", id = 10714338461, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "汤米 - 弓箭手（Archer）", id = 13823324057, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "BLACKPINK 终止（Shut Down）- 第二部分", id = 14901308987, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "僵尸（Zombie）", id = 10714089137, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "灭霸开心跳跃 - 鱿鱼游戏", id = 97611664803614, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "刺骨节拍（Bone Chillin' Bop）", id = 15122972413, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "周六舞蹈 - 二十一名飞行员乐队", id = 10714382522, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "阿迪达斯社区动画包", id = 75290611992385, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "你好表情", id = 10714359093, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "上下摇摆 - 二十一名飞行员乐队", id = 10714174918, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "带我沉沦扎拉·拉尔森表情", id = 10714345459, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "超级英雄揭晓表情", id = 10714355069, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "桑巴舞步", id = 14620742793, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "左右摇摆", id = 10714366910, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "th-afsc（英文缩写，保留原名）", id = 14024645241, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "梅·斯蒂芬斯 - 钢琴手", id = 16553163212, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "海绵宝宝想象时刻 🌈", id = 18443237526, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "面部健身操", id = 9830680869, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "甩头（Head Banging，摇滚动作）", id = 5915711491, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "钓鱼", id = 10714101749, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "阿迪达斯社区动画包", id = 88763136693023, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "睡觉（Sleep）", id = 10714360343, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "聚集表情（Huddle）", id = 10714366893, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "新舞蹈（newdance）", id = 14352353329, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "待机动画（Idle Animation）", id = 4417977954, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "英熙头部旋转 - 鱿鱼游戏（Young-hee，角色名）", id = 112011282168475, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "威肯星男孩漫步（The Weeknd Starboy Strut）", id = 71105746210464, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "KATSEYE - 触碰（Touch）", id = 135876612109535, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "顶级摇滚（Top Rock，街舞类型）", id = 10714336041, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "高举挥手", id = 10714362852, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "开心表情", id = 10714352626, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "曼城队倒钩射门（Man City，曼彻斯特城足球俱乐部）", id = 13421057998, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "埃尔顿·约翰 - 依然屹立（Still Standing）", id = 11444443576, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "猴子表情", id = 10714388352, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "跳跃欢呼表情", id = 10714376994, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "BLACKPINK - 恋爱病女孩（Lovesick Girls）", id = 16874472321, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "面部测试行走", id = 9803605108, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "头晕（Dizzy）", id = 10714066964, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "花哨脚步表情", id = 10714076981, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "TWICE 策略（Strategy）", id = 97311229290836, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "奥运会下法（体操动作）", id = 18665825805, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "不同意表情", id = 10714065135, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "埃尔顿·约翰 - 钢琴跳跃", id = 11453082181, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "阿迪达斯社区动画包", id = 82598234841035, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "妮琪·米娜 蟒蛇（Anaconda，歌曲名）", id = 15571450952, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "你好（Annyeong，韩语“안녕”音译）", id = 9527883498, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "花哨脚步", id = 10714076981, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "轻柔波浪（Quiet Waves）", id = 10714390497, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "摇滚吉他 - 皇家血液乐队", id = 10714393929, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "博罗克的愤怒（Borock's Rage）", id = 10713999630, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "妮琪·米娜 砰砰砰（Boom Boom Boom）", id = 15571448688, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "帕丽斯·希尔顿 - 标志性女孩（Iconic IT-Grrrl）", id = 15392756794, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "宝贝女王 - 弹跳旋转", id = 14352343065, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "面部测试奔跑", id = 9801814462, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "TWICE 放我自由 - 舞蹈二（Set Me Free - Dance 2）", id = 12714231087, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "博柏利宝石表情（Burberry Gem）", id = 10714008655, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "BLACKPINK boom bayah 动作（Boombayah，歌曲名）", id = 16553164850, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "舒缓氛围 - 乔治·埃兹拉", id = 10370353969, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "偶像表情", id = 10714372526, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "TWICE 我抓住你了 第一部分（I GOT YOU part 1）", id = 16215030041, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "高举双手", id = 10714361543, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "唤醒呼叫 - KSI（音乐人）", id = 10714168145, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "妮琪·米娜 星际飞船（Starships，歌曲名）", id = 15571453761, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "曼城队蝎子摆尾射门", id = 13694096724, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "阿迪达斯社区动画包", id = 122257458498464, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "指向二（Point2）", id = 10714395441, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "杨·布鲁德 – 高踢（YUNGBLUD – HIGH KICK）", id = 14022936101, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "帕丽斯·希尔顿 - 为节奏而活（Sliving For The Groove）", id = 15392759696, speed = 1, timepos = 0, looped = true, freezeonend = false},
+{name = "唰唰（Swish，拟声）", id = 10714349738, speed = 1, timepos = 0, looped = true, freezeonend = false},
+ 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     
-    -- 创建脚部 Attachment
-    local footAttachment = root:FindFirstChild("IceFootAttachment")
-    if not footAttachment then
-        footAttachment = Instance.new("Attachment")
-        footAttachment.Name = "IceFootAttachment"
-        footAttachment.Position = Vector3.new(0, -2, 0) -- 脚下偏移
-        footAttachment.Parent = root
-    end
+}
 
-    -- 冰霜粒子发射器参数
-    local particleConfigs = {
-        {
-            name = "IceRing",
-            texture = "rbxassetid://48374994",
-            color = ColorSequence.new{
-                ColorSequenceKeypoint.new(0, Color3.fromRGB(173,216,230)),  -- 浅蓝色
-                ColorSequenceKeypoint.new(0.5, Color3.fromRGB(135,206,250)), -- 天蓝色
-                ColorSequenceKeypoint.new(1, Color3.fromRGB(255,255,255))    -- 白色
-            },
-            lightEmission = 0.8,
-            size = NumberSequence.new{
-                NumberSequenceKeypoint.new(0, 6),
-                NumberSequenceKeypoint.new(0.5, 10),
-                NumberSequenceKeypoint.new(1, 4)
-            },
-            rate = 35,
-            lifetime = NumberRange.new(1.8, 2.8),
-            speed = NumberRange.new(5, 8),
-            acceleration = Vector3.new(0, 6, 0),
-            rotation = NumberRange.new(0, 360),
-            rotSpeed = NumberRange.new(40, 80),
-            transparency = NumberSequence.new{
-                NumberSequenceKeypoint.new(0, 0.3),
-                NumberSequenceKeypoint.new(0.7, 0.6),
-                NumberSequenceKeypoint.new(1, 1)
-            },
-            emissionDirection = Enum.NormalId.Top,
-            zOffset = 0.3,
-            spreadAngle = Vector2.new(360, 360),
-        },
-        {
-            name = "IceCrystals",
-            texture = "rbxassetid://296874871",
-            color = ColorSequence.new{
-                ColorSequenceKeypoint.new(0, Color3.fromRGB(176,224,230)),  -- 粉蓝色
-                ColorSequenceKeypoint.new(0.5, Color3.fromRGB(175,238,238)), -- 浅青色
-                ColorSequenceKeypoint.new(1, Color3.fromRGB(240,248,255))    -- 幽灵白
-            },
-            lightEmission = 0.6,
-            size = NumberSequence.new{
-                NumberSequenceKeypoint.new(0, 2.5),
-                NumberSequenceKeypoint.new(0.5, 5),
-                NumberSequenceKeypoint.new(1, 1.5)
-            },
-            rate = 60,
-            lifetime = NumberRange.new(1.5, 2.5),
-            speed = NumberRange.new(6, 12),
-            acceleration = Vector3.new(0, 8, 0),
-            rotation = NumberRange.new(0, 360),
-            rotSpeed = NumberRange.new(-60, 60),
-            transparency = NumberSequence.new{
-                NumberSequenceKeypoint.new(0, 0.2),
-                NumberSequenceKeypoint.new(0.6, 0.5),
-                NumberSequenceKeypoint.new(1, 0.9)
-            },
-            emissionDirection = Enum.NormalId.Top,
-            zOffset = 0.8,
-            spreadAngle = Vector2.new(90, 90),
-        },
-        {
-            name = "IceShards",
-            texture = "rbxassetid://242610973",
-            color = ColorSequence.new{
-                ColorSequenceKeypoint.new(0, Color3.fromRGB(224,255,255)),  -- 浅青色
-                ColorSequenceKeypoint.new(0.5, Color3.fromRGB(173,216,230)), -- 浅蓝色
-                ColorSequenceKeypoint.new(1, Color3.fromRGB(135,206,235))    -- 天蓝色
-            },
-            lightEmission = 0.9,
-            size = NumberSequence.new{
-                NumberSequenceKeypoint.new(0, 1.2),
-                NumberSequenceKeypoint.new(0.5, 3.5),
-                NumberSequenceKeypoint.new(1, 0.4)
-            },
-            rate = 45,
-            lifetime = NumberRange.new(1.2, 2.2),
-            speed = NumberRange.new(8, 15),
-            acceleration = Vector3.new(0, 12, 0),
-            rotation = NumberRange.new(0, 360),
-            rotSpeed = NumberRange.new(-120, 120),
-            transparency = NumberSequence.new{
-                NumberSequenceKeypoint.new(0, 0.1),
-                NumberSequenceKeypoint.new(0.7, 0.4),
-                NumberSequenceKeypoint.new(1, 0.8)
-            },
-            emissionDirection = Enum.NormalId.Top,
-            zOffset = 1.2,
-            spreadAngle = Vector2.new(45, 45),
-        }
-    }
+-- 新增：弹出窗口功能
+-- 创建弹出窗口的函数（提前定义）
+local function createPopupWindow(title, windowId, backgroundColor)
+	-- 如果窗口已存在，直接显示
+	if popupWindows[windowId] then
+		popupWindows[windowId]["Visible"] = true
+		return popupWindows[windowId]
+	end
+	
+	-- 定义三种弹窗的背景颜色
+	local popupColors = {
+		customPopup1 = Color3.fromRGB(70, 130, 180), -- 蓝色
+		customPopup2 = Color3.fromRGB(255, 140, 0),  -- 橙色
+		customPopup3 = Color3.fromRGB(139, 69, 19)   -- 咖啡色
+	}
+	
+	-- 根据windowId选择背景颜色，如果没有指定则使用传入的backgroundColor或默认颜色
+	local finalBackgroundColor = popupColors[windowId] or backgroundColor or Color3.fromRGB(45, 45, 45)
+	
+	-- 弹窗状态变量
+	local isPopupMinimized = false
+	local popupMaxSize = UDim2.new(0, 320, 0, 240) -- 与主UI窗口相同大小
+	local popupMinSize = UDim2.new(0, 30, 0, 30) -- 与主UI窗口最小化大小相同
+	
+	-- 创建新的弹出窗口
+	local popupFrame = Instance.new("Frame")
+	popupFrame["Name"] = "PopupWindow" .. windowId
+	popupFrame["Size"] = popupMaxSize -- 弹窗尺寸
+	popupFrame["Position"] = UDim2.new(0.5, -160, 0.5, -120) -- 居中显示（320/2=160, 240/2=120）
+	popupFrame["BackgroundColor3"] = finalBackgroundColor -- 恢复使用区分颜色
+	popupFrame["BorderSizePixel"] = 0
+	popupFrame["BackgroundTransparency"] = 0.3 -- 恢复原有透明度以显示颜色
+	popupFrame["Parent"] = gui
+	popupFrame["Visible"] = true
+	
+	-- 弹窗圆角
+	local popupCorner = Instance.new("UICorner")
+	popupCorner.CornerRadius = UDim.new(0, 12)
+	popupCorner.Parent = popupFrame
+	
+	-- 弹窗标题栏
+	local popupTitleBar = Instance.new("Frame")
+	popupTitleBar["Size"] = UDim2.new(1, 0, 0, 35)
+	popupTitleBar["Position"] = UDim2.new(0, 0, 0, 0)
+	popupTitleBar["BackgroundColor3"] = finalBackgroundColor -- 恢复使用区分颜色
+	popupTitleBar["BackgroundTransparency"] = 0.3 -- 恢复原有透明度以显示颜色
+	popupTitleBar["BorderSizePixel"] = 0
+	popupTitleBar["Parent"] = popupFrame
+	
+	-- 标题栏圆角
+	local titleBarCorner = Instance.new("UICorner")
+	titleBarCorner.CornerRadius = UDim.new(0, 12)
+	titleBarCorner.Parent = popupTitleBar
+	
+	-- 弹窗标题
+	local popupTitle = Instance.new("TextLabel")
+	popupTitle["Size"] = UDim2.new(1, -120, 1, 0)
+	popupTitle["Position"] = UDim2.new(0, 10, 0, 0)
+	popupTitle["BackgroundTransparency"] = 1
+	popupTitle["Text"] = title
+	popupTitle["TextColor3"] = Color3.new(1, 1, 1)
+	popupTitle["TextSize"] = 14
+	popupTitle["Font"] = Enum.Font.RobotoMono
+	popupTitle["TextXAlignment"] = Enum.TextXAlignment.Left
+	popupTitle["Parent"] = popupTitleBar
+	
 
-    -- 保存所有粒子发射器
-    local emitters = {}
+	-- 停止按钮
+	local stopBtn = Instance.new("TextButton")
+	stopBtn["Size"] = UDim2.new(0, 25, 0, 25)
+	stopBtn["Position"] = UDim2.new(1, -55, 0, 5) -- 在关闭按钮左边
+	stopBtn["BackgroundColor3"] = Color3.fromRGB(220, 20, 60) -- 红色停止按钮
+	stopBtn["Text"] = "■"
+	stopBtn["TextColor3"] = Color3.new(1, 1, 1)
+	stopBtn["TextSize"] = 12
+	stopBtn["Font"] = Enum.Font.RobotoMono
+	stopBtn["BorderSizePixel"] = 0
+	stopBtn["BackgroundTransparency"] = 0.3
+	stopBtn["Parent"] = popupTitleBar
+	
+	local stopBtnCorner = Instance.new("UICorner")
+	stopBtnCorner.CornerRadius = UDim.new(0, 6)
+	stopBtnCorner.Parent = stopBtn
+	
+	-- 停止按钮点击事件（只停止当前弹窗相关的动画）
+	stopBtn["MouseButton1Click"]:Connect(function()
+		clickSound()
+		-- 停止当前静态动作
+		if currentStaticTrack then
+			if currentStaticTrack.IsPlaying then
+				currentStaticTrack:Stop()
+			end
+			currentStaticTrack:Destroy()
+			currentStaticTrack = nil
+		end
+		
+		-- 根据弹窗类型停止相应动画
+		if windowId == "customPopup1" then
+			-- 第一个弹窗：停止走路动画
+			if walkTrack then
+				if walkTrack.IsPlaying then
+					walkTrack:Stop()
+				end
+				walkTrack:Destroy()
+				walkTrack = nil
+			end
+		elseif windowId == "customPopup2" then
+			-- 第二个弹窗：停止待机动画
+			if idleTrack then
+				if idleTrack.IsPlaying then
+					idleTrack:Stop()
+				end
+				idleTrack:Destroy()
+				idleTrack = nil
+				isIdleActive = false
+			end
+		elseif windowId == "customPopup3" then
+			-- 第三个弹窗：停止跳跃动画
+			if jumpTrack then
+				if jumpTrack.IsPlaying then
+					jumpTrack:Stop()
+				end
+				jumpTrack:Destroy()
+				jumpTrack = nil
+				isJumpActive = false
+			end
+		end
+	end)
+	
+	-- 关闭按钮
+	local closeBtn = Instance.new("TextButton")
+	closeBtn["Size"] = UDim2.new(0, 25, 0, 25)
+	closeBtn["Position"] = UDim2.new(1, -30, 0, 5) -- 稍微往左移动
+	closeBtn["BackgroundColor3"] = Color3.fromRGB(135, 206, 235)
+	closeBtn["Text"] = "X"
+	closeBtn["TextColor3"] = Color3.new(1, 1, 1)
+	closeBtn["TextSize"] = 14
+	closeBtn["Font"] = Enum.Font.RobotoMono
+	closeBtn["BorderSizePixel"] = 0
+	closeBtn["BackgroundTransparency"] = 0.3
+	closeBtn["Parent"] = popupTitleBar
+	
+	local closeBtnCorner = Instance.new("UICorner")
+	closeBtnCorner.CornerRadius = UDim.new(0, 6)
+	closeBtnCorner.Parent = closeBtn
+	
+	-- 内容区域
+	local contentArea = Instance.new("Frame")
+	contentArea["Size"] = UDim2.new(1, 0, 1, -35)
+	contentArea["Position"] = UDim2.new(0, 0, 0, 35)
+	contentArea["BackgroundTransparency"] = 1
+	contentArea["Parent"] = popupFrame
+	
+	-- 动画按钮区域（移除工具栏，直接使用整个内容区域）
+	local buttonArea = Instance.new("Frame")
+	buttonArea["Size"] = UDim2.new(1, -10, 1, -10)
+	buttonArea["Position"] = UDim2.new(0, 5, 0, 5)
+	buttonArea["BackgroundColor3"] = Color3.fromRGB(40, 40, 40) -- 恢复原有颜色
+	buttonArea["BorderSizePixel"] = 0
+	buttonArea["BackgroundTransparency"] = 0.5 -- 恢复原有透明度
+	buttonArea["Parent"] = contentArea
+	
+	local buttonAreaCorner = Instance.new("UICorner")
+	buttonAreaCorner.CornerRadius = UDim.new(0, 8)
+	buttonAreaCorner.Parent = buttonArea
+	
+	-- 滚动框架
+	local animScrollFrame = Instance.new("ScrollingFrame")
+	animScrollFrame["Size"] = UDim2.new(1, -10, 1, -10)
+	animScrollFrame["Position"] = UDim2.new(0, 5, 0, 5)
+	animScrollFrame["CanvasSize"] = UDim2.new(0, 0, 0, 0)
+	animScrollFrame["ScrollBarThickness"] = 0 -- 隐藏滚动条，解决右边空白问题
+	animScrollFrame["BorderSizePixel"] = 0
+	animScrollFrame["BackgroundTransparency"] = 1
+	animScrollFrame["Parent"] = buttonArea
+	
+	-- 动画按钮容器
+	local animButtonContainer = Instance.new("Frame")
+	animButtonContainer["Size"] = UDim2.new(1, 0, 1, 0)
+	animButtonContainer["BackgroundTransparency"] = 1
+	animButtonContainer["Parent"] = animScrollFrame
+	
+	-- 网格布局（调整为四排布局）
+	local animGridLayout = Instance.new("UIGridLayout")
+	animGridLayout["CellPadding"] = UDim2.new(0, 3, 0, 3) -- 增加间距以减少拥挤感
+	animGridLayout["CellSize"] = UDim2.new(0, 65, 0, 40) -- 稍微增大按钮尺寸，提升视觉效果
+	animGridLayout["SortOrder"] = Enum.SortOrder.LayoutOrder
+	animGridLayout["FillDirection"] = Enum.FillDirection.Horizontal -- 水平填充
+	animGridLayout["HorizontalAlignment"] = Enum.HorizontalAlignment.Left -- 左对齐
+	animGridLayout["VerticalAlignment"] = Enum.VerticalAlignment.Top -- 顶部对齐
+	animGridLayout["Parent"] = animButtonContainer
+	
+	-- 创建弹窗动画按钮的函数（简化版，移除编辑删除功能）
+	local function createPopupAnimButton(animData, layoutOrder)
+		local animButton = Instance.new("ImageButton")
+		animButton["Size"] = UDim2.new(1, 0, 1, 0)
+		animButton["BackgroundColor3"] = Color3.fromRGB(60, 60, 60)
+		animButton["BorderSizePixel"] = 0
+		animButton["BackgroundTransparency"] = 0.2 -- 降低透明度以显示渐变效果
+		animButton["LayoutOrder"] = layoutOrder
+		animButton["Parent"] = animButtonContainer
+		
+		-- 添加七彩渐变背景效果（与主UI按钮一致）
+		local colorfulGradient = Instance.new("UIGradient")
+		colorfulGradient.Color = ColorSequence.new{
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 128)),   -- 粉红色
+			ColorSequenceKeypoint.new(0.16, Color3.fromRGB(255, 128, 0)), -- 橙色
+			ColorSequenceKeypoint.new(0.33, Color3.fromRGB(255, 255, 0)), -- 黄色
+			ColorSequenceKeypoint.new(0.5, Color3.fromRGB(0, 255, 0)),    -- 绿色
+			ColorSequenceKeypoint.new(0.66, Color3.fromRGB(0, 255, 255)), -- 青色
+			ColorSequenceKeypoint.new(0.83, Color3.fromRGB(0, 128, 255)), -- 蓝色
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(128, 0, 255))     -- 紫色
+		}
+		colorfulGradient.Rotation = math.random(0, 360) -- 随机旋转角度
+		colorfulGradient.Parent = animButton
+		
+		-- 设置动画图片
+		if animData.customImage and animData.customImage ~= "" then
+			animButton["Image"] = animData.customImage
+		elseif animData.id and animData.id ~= 0 then
+			animButton["Image"] = "rbxthumb://type=Asset&id=" .. animData.id .. "&w=150&h=150"
+		else
+			animButton["Image"] = "rbxthumb://type=Asset&id=101622803562033&w=150&h=150"
+		end
+		animButton["ImageTransparency"] = 0.1
+		
+		local animBtnCorner = Instance.new("UICorner")
+		animBtnCorner.CornerRadius = UDim.new(0, 8)
+		animBtnCorner.Parent = animButton
+		
+		-- 文本标签
+		local animLabel = Instance.new("TextLabel")
+		animLabel["Size"] = UDim2.new(1, 0, 0, 18)
+		animLabel["Position"] = UDim2.new(0, 0, 1, -18)
+		animLabel["BackgroundColor3"] = Color3.fromRGB(45, 45, 45) -- 恢复原有颜色
+		animLabel["BackgroundTransparency"] = 0.3 -- 恢复原有透明度
+		animLabel["Text"] = animData.name
+		animLabel["TextColor3"] = Color3.new(1, 1, 1)
+		animLabel["TextSize"] = 10
+		animLabel["Font"] = Enum.Font.RobotoMono
+		animLabel["TextWrapped"] = true
+		animLabel["BorderSizePixel"] = 0
+		animLabel["Parent"] = animButton
+		
+		local animLabelCorner = Instance.new("UICorner")
+		animLabelCorner.CornerRadius = UDim.new(0, 6)
+		animLabelCorner.Parent = animLabel
+		
+		-- 创建执行提示函数
+		local function showExecutionFeedback(animType)
+			-- 按钮高亮效果
+			local originalTransparency = animButton.BackgroundTransparency
+			animButton.BackgroundTransparency = 0
+			
+			-- 创建执行提示标签
+			local feedbackLabel = Instance.new("TextLabel")
+			feedbackLabel["Size"] = UDim2.new(1, 0, 0, 20)
+			feedbackLabel["Position"] = UDim2.new(0, 0, 0.5, -10)
+			feedbackLabel["BackgroundColor3"] = Color3.fromRGB(0, 255, 0)
+			feedbackLabel["BackgroundTransparency"] = 0.2
+			feedbackLabel["Text"] = animType .. "已执行"
+			feedbackLabel["TextColor3"] = Color3.new(1, 1, 1)
+			feedbackLabel["TextSize"] = 12
+			feedbackLabel["Font"] = Enum.Font.RobotoMono
+			feedbackLabel["TextStrokeTransparency"] = 0
+			feedbackLabel["TextStrokeColor3"] = Color3.new(0, 0, 0)
+			feedbackLabel["BorderSizePixel"] = 0
+			feedbackLabel["Parent"] = animButton
+			
+			local feedbackCorner = Instance.new("UICorner")
+			feedbackCorner.CornerRadius = UDim.new(0, 6)
+			feedbackCorner.Parent = feedbackLabel
+			
+			-- 淡出动画效果
+			local tweenService = game:GetService("TweenService")
+			local fadeInfo = TweenInfo.new(2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+			
+			-- 恢复按钮透明度
+			wait(0.1)
+			animButton.BackgroundTransparency = originalTransparency
+			
+			-- 提示标签淡出
+			local fadeTween = tweenService:Create(feedbackLabel, fadeInfo, {
+				BackgroundTransparency = 1,
+				TextTransparency = 1,
+				TextStrokeTransparency = 1
+			})
+			fadeTween:Play()
+			
+			-- 清理提示标签
+			fadeTween.Completed:Connect(function()
+				feedbackLabel:Destroy()
+			end)
+		end
 
-    for i, cfg in particleConfigs do
-        if not footAttachment:FindFirstChild(cfg.name) then
-            local emitter = Instance.new("ParticleEmitter")
-            emitter.Name = cfg.name
-            emitter.Texture = cfg.texture
-            emitter.Color = cfg.color
-            emitter.LightEmission = cfg.lightEmission
-            emitter.Size = cfg.size
-            emitter.Rate = cfg.rate
-            emitter.Lifetime = cfg.lifetime
-            emitter.Speed = cfg.speed
-            emitter.Acceleration = cfg.acceleration
-            emitter.Rotation = cfg.rotation
-            emitter.RotSpeed = cfg.rotSpeed
-            emitter.Transparency = cfg.transparency
-            emitter.EmissionDirection = cfg.emissionDirection
-            emitter.ZOffset = cfg.zOffset
-            emitter.SpreadAngle = cfg.spreadAngle
-            emitter.Enabled = true
-            emitter.Parent = footAttachment
-            emitters[cfg.name] = emitter
-        else
-            emitters[cfg.name] = footAttachment:FindFirstChild(cfg.name)
+		-- 动画按钮点击事件
+		animButton["MouseButton1Click"]:Connect(function()
+			clickSound()
+			-- 判断是否为走路动画
+			if animData.isWalk then
+				-- 显示走路动画执行提示
+				showExecutionFeedback("走路动画")
+				-- 走路动画逻辑：替换当前走路动画
+				if localplayer.Character then
+					local humanoid = localplayer.Character:FindFirstChildOfClass("Humanoid")
+					if humanoid then
+						-- 停止并销毁当前走路动画
+						if walkTrack then
+							walkTrack:Stop()
+							walkTrack:Destroy()
+							walkTrack = nil
+						end
+						
+						-- 如果选择"正常走路"（id=0），恢复默认走路
+						if animData.id == 0 then
+							-- 重新初始化默认走路动画
+							local walkAnim = Instance.new("Animation")
+							walkAnim.AnimationId = "rbxassetid://1070017263" -- 默认走路
+							walkTrack = humanoid:LoadAnimation(walkAnim)
+							walkTrack.Looped = true
+							walkTrack:AdjustWeight(3) -- 走路权重高于静态动作
+						else
+							-- 加载自定义走路动画
+							local walkAnim = Instance.new("Animation")
+							walkAnim.AnimationId = "rbxassetid://" .. animData.id
+							walkTrack = humanoid:LoadAnimation(walkAnim)
+							walkTrack.Looped = true
+							walkTrack:AdjustWeight(3) -- 走路权重高于静态动作
+						end
+					end
+				end
+			else
+				-- 跳跃动画逻辑：设置跳跃动画
+				if animData.isJump then
+					-- 显示跳跃动画执行提示
+					showExecutionFeedback("跳跃动画")
+					if localplayer.Character then
+						local humanoid = localplayer.Character:FindFirstChildOfClass("Humanoid")
+						if humanoid and animData.id and animData.id ~= 0 then
+							-- 停止当前跳跃动画
+							if jumpTrack then
+								jumpTrack:Stop()
+								jumpTrack:Destroy()
+								jumpTrack = nil
+							end
+							
+							-- 加载新的跳跃动画
+							local animation = Instance.new("Animation")
+							animation.AnimationId = "rbxassetid://" .. animData.id
+							jumpTrack = humanoid:LoadAnimation(animation)
+							jumpTrack.Looped = true
+							jumpTrack:AdjustWeight(5) -- 跳跃动画权重最高
+							
+							-- 重置跳跃状态
+							isJumpActive = false
+						end
+					end
+				-- 待机动画逻辑：设置待机动画
+				elseif animData.isIdle then
+					-- 显示待机动画执行提示
+					showExecutionFeedback("待机动画")
+					if localplayer.Character then
+						local humanoid = localplayer.Character:FindFirstChildOfClass("Humanoid")
+						if humanoid and animData.id and animData.id ~= 0 then
+							-- 停止当前待机动画
+							if idleTrack then
+								idleTrack:Stop()
+								idleTrack:Destroy()
+								idleTrack = nil
+							end
+							
+							-- 加载新的待机动画
+							local animation = Instance.new("Animation")
+							animation.AnimationId = "rbxassetid://" .. animData.id
+							idleTrack = humanoid:LoadAnimation(animation)
+							idleTrack.Looped = true
+							idleTrack:AdjustWeight(4) -- 待机动画权重最高
+							
+							-- 重置待机状态
+							isIdleActive = false
+							lastMovementTime = tick()
+						end
+					end
+				else
+					-- 显示普通动画执行提示
+					showExecutionFeedback("动画")
+					-- 普通动作动画逻辑：播放静态动作
+					if localplayer.Character then
+						local humanoid = localplayer.Character:FindFirstChildOfClass("Humanoid")
+						if humanoid and animData.id and animData.id ~= 0 then
+							-- 停止当前静态动画
+							if currentStaticTrack then
+								currentStaticTrack:Stop()
+								currentStaticTrack = nil
+							end
+							
+							local animation = Instance.new("Animation")
+							animation.AnimationId = "rbxassetid://" .. animData.id
+							currentStaticTrack = humanoid:LoadAnimation(animation)
+							currentStaticTrack:Play()
+							currentStaticTrack.Looped = animData.looped or true
+							currentStaticTrack.TimePosition = animData.timepos or 0
+							currentStaticTrack:AdjustSpeed(animData.speed or 1)
+							currentStaticTrack:AdjustWeight(1) -- 静态动作权重低于走路
+						end
+					end
+				end
+			end
+		end)
+		
+		return animButton
+	end
+	
+	-- 为不同弹窗定义不同的动画按钮
+	local popupAnimations = {
+		customPopup1 = { -- 蓝色弹窗 - 走路动画 --跳跃动画包  --走路动画包 --待机动画包
+			{name = "欠揍走路", id = 1070017263, customImage = "rbxthumb://type=Asset&id=16658431154&w=150&h=150", isWalk = true},
+           {name = "微跳走路", id = 507777826, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "外八走路", id = 1070001516, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "踮脚走路", id = 1212980338, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true}, -- 恢复默认走路
+{name = "少女走路", id = 1212980348, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "鸡哥走路1", id = 1132510133, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "鸡哥走路2", id = 1132494274, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "内八走路", id = 941028902, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "小跳走路", id = 941015281, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "摇晃走路", id = 1014421541, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "嘎子走路", id = 1014401683, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "蛇腰走路", id = 4708193840, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "俯冲走路", id = 4708192705, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = " 平滑移动", id = 10921232093, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "僵直走路1", id = 10921240218, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "僵直走路2", id = 10921244891 , customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "正常走路", id = 19534419048, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "蹦跳走路", id = 72301599441680, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "超搔走路", id =  92072849924640, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "小碎步1", id = 10921261968, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "小碎步2", id = 10921269718, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "跳跳走路", id = 10921276116, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "淑女走路", id = 10921283326, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "崴脚走路1", id = 10921250460, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "崴脚走路2", id = 10921255446, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "盲人走路1", id = 10921306285, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "盲人走路2", id = 10921312010, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "姐就是女王", id = 16738337225, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "交叉走路", id = 16738340646, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "跨步奔跑", id = 18537384940, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "开心走路", id = 18537392113, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "仰头走路", id = 616163682, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "撇脚走路", id = 10921355261, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "撇脚走路", id = 10921148209, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "撇脚走路", id = 10921152678, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "男人婆走路1", id = 81024476153754, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "男人婆走路2", id = 109168724482748, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "小外八走路1", id = 10921076136, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "小外八走路2", id = 10921082452, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "小棉袄走路", id = 10921057244 , customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "摇摆走路", id = 10980888364, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "鹅鹅鹅走路1", id = 10921104374, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "鹅鹅鹅走路2", id = 10921157929 , customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "超可爱走路", id = 18747070484, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "超可爱走路", id = 1132489853, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true},
+{name = "拐子走路", id = 1150967949, customImage = "rbxthumb://type=Asset&id=13317812674&w=150&h=150", isWalk = true}
+		},
+		customPopup2 = { -- 橙色弹窗 - 待机动画
+			{name = "摇晃坐姿", id = 130995344283026, customImage = "rbxthumb://type=Asset&id=13764999189&w=150&h=150", isIdle = true},
+{name = "漂浮趴姿", id = 77840765435893, customImage = "rbxthumb://type=Asset&id=13764999189&w=150&h=150", isIdle = true},
+{name = "摇头晃脑", id = 135611169366768, customImage = "rbxthumb://type=Asset&id=13764999189&w=150&h=150", isIdle = true},
+{name = "悬空冥想", id = 86872878957632, customImage = "rbxthumb://type=Asset&id=13764999189&w=150&h=150", isIdle = true},
+{name = "思考动作", id = 127088545449493, customImage = "rbxthumb://type=Asset&id=13764999189&w=150&h=150", isIdle = true},
+{name = "超级开心", id = 10714352626, customImage = "rbxthumb://type=Asset&id=13764999189&w=150&h=150", isIdle = true},
+{name = "微笑挥手", id = 1069987858, customImage = "rbxthumb://type=Asset&id=13764999189&w=150&h=150", isIdle = true},
+{name = "头左右微观", id = 1150842221, customImage = "rbxthumb://type=Asset&id=13764999189&w=150&h=150", isIdle = true},
+{name = "左右偷看", id = 1132477671, customImage = "rbxthumb://type=Asset&id=13764999189&w=150&h=150", isIdle = true},
+{name = "双手合击", id = 941013098, customImage = "rbxthumb://type=Asset&id=13764999189&w=150&h=150", isIdle = true},
+{name = "左右观看", id = 1014398616, customImage = "rbxthumb://type=Asset&id=13764999189&w=150&h=150", isIdle = true},
+{name = "双手微托", id = 4708192150, customImage = "rbxthumb://type=Asset&id=13764999189&w=150&h=150", isIdle = true},
+{name = "双脚并拢", id = 10921230744, customImage = "rbxthumb://type=Asset&id=13764999189&w=150&h=150", isIdle = true},
+{name = "微笑摇晃", id = 118832222982049, customImage = "rbxthumb://type=Asset&id=13764999189&w=150&h=150", isIdle = true},
+{name = "微笑眨眼1", id = 10921259953, customImage = "rbxthumb://type=Asset&id=13764999189&w=150&h=150", isIdle = true},
+{name = "微笑眨眼2", id = 10921272275, customImage = "rbxthumb://type=Asset&id=13764999189&w=150&h=150", isIdle = true},
+{name = "微笑眨眼3", id = 10921248039, customImage = "rbxthumb://type=Asset&id=13764999189&w=150&h=150", isIdle = true},
+{name = "仰头观看", id = 10921344533, customImage = "rbxthumb://type=Asset&id=13764999189&w=150&h=150", isIdle = true},
+{name = "手后敬礼", id = 133806214992291, customImage = "rbxthumb://type=Asset&id=13764999189&w=150&h=150", isIdle = true},
+{name = "夸张微笑", id = 18747067405, customImage = "rbxthumb://type=Asset&id=13764999189&w=150&h=150", isIdle = true},
+{name = "假坐姿势", id = 10921155160, customImage = "rbxthumb://type=Asset&id=13764999189&w=150&h=150", isIdle = true},
+{name = "机器人", id = 10714392151, customImage = "rbxthumb://type=Asset&id=13764999189&w=150&h=150", isIdle = true},
+{name = "空气吉他", id = 10713959108, customImage = "rbxthumb://type=Asset&id=13764999189&w=150&h=150", isIdle = true},
+{name = "经典猴子", id = 10714388352, customImage = "rbxthumb://type=Asset&id=13764999189&w=150&h=150", isIdle = true},
+{name = "莲花坐姿", id = 12507085924, customImage = "rbxthumb://type=Asset&id=13764999189&w=150&h=150", isIdle = true}
+
+
+
+		},
+		customPopup3 = { -- 咖啡色弹窗 - 跳跃动画
+			{name = "微笑跳跃", id = 1132489853, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "微笑滑翔", id = 1132469004, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "抱肚微笑", id = 1149612882, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "飞机动作", id = 82135680487389, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "漂浮趴姿", id = 77840765435893, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "1 跳跃动画", id = 1069984524, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "2 跳跃动画", id = 1212954642, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "3 跳跃动画", id = 1150944216, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "4 跳跃动画", id = 1132489853, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "5 跳跃动画", id = 941008832, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "6 跳跃动画", id = 1014394726, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "7 跳跃动画", id = 4708188025, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "8 跳跃动画", id = 10921242013, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "9 跳跃动画", id = 104325245285198, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "10 跳跃动画", id = 10921263860, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "11 跳跃动画", id = 10921279832, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "12 跳跃动画", id = 10921252123, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "13 跳跃动画", id = 10921308158, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "14 跳跃动画", id = 16738336650, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "15 跳跃动画", id = 18537380791, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "16 跳跃动画", id = 10921351278, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "17 跳跃动画", id = 10921149743, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "18 跳跃动画", id = 116936326516985, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "19 跳跃动画", id = 10921078135, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "20 跳跃动画", id = 10921062673, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "21 跳跃动画", id = 10921107367, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "22 跳跃动画", id = 18747069148, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "23 跳跃动画", id = 10921322186, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "24 跳跃动画", id = 10921160088, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "25 跳跃动画", id = 10921294559, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "26 跳跃动画", id = 10921137402, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "27 跳跃动画", id = 119846112151352, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "28 跳跃动画", id = 1083218792, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "29 跳跃动画", id = 10921123517, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "30 跳跃动画", id = 10921042494, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "31 跳跃动画", id = 750782230, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "32 漂浮趴姿", id = 77840765435893, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true},{name = "空中画圈", id = 1212900995, customImage = "rbxthumb://type=Asset&id=6567073136&w=150&h=150", isJump = true}
+
+			
+		}
+	}
+	
+	-- 获取当前弹窗的动画数据，如果没有则使用默认数据
+	local currentAnimations = popupAnimations[windowId] or {
+		{name = "动画1", id = 507766388, customImage = "rbxassetid://507766388"},
+		{name = "动画2", id = 507766666, customImage = "rbxassetid://507766666"},
+		{name = "动画3", id = 507766951, customImage = "rbxassetid://507766951"},
+		{name = "动画4", id = 507777268, customImage = "rbxassetid://507777268"},
+		{name = "动画5", id = 507777451, customImage = "rbxassetid://507777451"},
+		{name = "动画6", id = 507777623, customImage = "rbxassetid://507777623"}
+	}
+	
+	-- 创建当前弹窗的按钮
+	for i, animData in ipairs(currentAnimations) do
+		createPopupAnimButton(animData, i)
+	end
+	
+	-- 关闭按钮事件
+	closeBtn["MouseButton1Click"]:Connect(function()
+		clickSound()
+		popupFrame:Destroy()
+		popupWindows[windowId] = nil
+	end)
+	
+	-- 拖拽功能
+	local popupDragging = false
+	local popupDragStart = nil
+	local popupStartPos = nil
+	
+	popupTitleBar["InputBegan"]:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			popupDragging = true
+			popupDragStart = input.Position
+			popupStartPos = popupFrame.Position
+			
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then
+					popupDragging = false
+				end
+			end)
+		end
+	end)
+	
+	userInputService.InputChanged:Connect(function(input)
+		if popupDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+			local delta = input.Position - popupDragStart
+			popupFrame.Position = UDim2.new(
+				popupStartPos.X.Scale, popupStartPos.X.Offset + delta.X,
+				popupStartPos.Y.Scale, popupStartPos.Y.Offset + delta.Y
+			)
+		end
+	end)
+	
+	-- 自适应滚动框大小
+	animGridLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+		animScrollFrame["CanvasSize"] = UDim2.new(0, 0, 0, animGridLayout["AbsoluteContentSize"]["Y"])
+	end)
+	
+	-- 存储窗口引用
+	popupWindows[windowId] = popupFrame
+	
+	return popupFrame
+end
+
+-- 5. 动作按钮创建函数：仅最大化生效
+local function createAnimButton(data)
+	-- 创建ImageButton而不是TextButton，以支持图片显示
+	local button = Instance.new("ImageButton")
+	button["Name"] = data.name -- 按钮名称（与动画名称一致）
+	button["Size"] = UDim2.new(1, 0, 1, 0) -- 尺寸与布局单元格一致
+	
+	-- 创建五彩斑斓的背景渐变效果
+	local colorfulGradient = Instance.new("UIGradient")
+	colorfulGradient.Color = ColorSequence.new{
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 128)),   -- 粉红色
+		ColorSequenceKeypoint.new(0.16, Color3.fromRGB(255, 128, 0)), -- 橙色
+		ColorSequenceKeypoint.new(0.33, Color3.fromRGB(255, 255, 0)), -- 黄色
+		ColorSequenceKeypoint.new(0.5, Color3.fromRGB(0, 255, 0)),    -- 绿色
+		ColorSequenceKeypoint.new(0.66, Color3.fromRGB(0, 255, 255)), -- 青色
+		ColorSequenceKeypoint.new(0.83, Color3.fromRGB(0, 128, 255)), -- 蓝色
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(128, 0, 255))     -- 紫色
+	}
+	colorfulGradient.Rotation = math.random(0, 360) -- 随机旋转角度
+	colorfulGradient.Parent = button
+	
+	-- 根据动画包类型设置不同的背景颜色，跟随右上角按钮颜色
+	local backgroundColor = Color3.fromRGB(20, 45, 90) -- 默认颜色
+	if data.name == "走路动画包" then
+		backgroundColor = INTERACTIVE_COLORS.button1 -- 红色系
+	elseif data.name == "待机动画包" then
+		backgroundColor = INTERACTIVE_COLORS.button2 -- 绿色系
+	elseif data.name == "跳跃动画包" then
+		backgroundColor = INTERACTIVE_COLORS.button3 -- 蓝色系
+	end
+	
+	button["BackgroundColor3"] = backgroundColor
+	button["BorderSizePixel"] = 0 -- 无边框
+	button["BackgroundTransparency"] = 0.2 -- 透明度：80%可见（降低透明度以显示渐变效果）
+	button["Parent"] = buttonContainer -- 父级设为按钮容器
+	
+	-- 设置按钮属性，用于搜索功能
+	button:SetAttribute("name", data.name)
+	button:SetAttribute("id", data.id)
+	button:SetAttribute("number", 1) -- 默认序列号为1
+	
+	-- 添加动画图片（支持自定义图片或默认图片）
+	if data.isCustom and data.customImage then
+		button["Image"] = data.customImage -- 使用自定义图片
+	else
+		button["Image"] = "rbxthumb://type=Asset&id=101622803562033&w=150&h=150" -- 默认图片
+	end
+	button["ImageTransparency"] = 0.1 -- 图片完全不透明
+	button["ScaleType"] = Enum.ScaleType.Fit -- 设置图片缩放类型为适应，防止拉伸变形
+	
+	-- 添加UIAspectRatioConstraint来保持图片比例
+	local aspectRatio = Instance.new("UIAspectRatioConstraint")
+	aspectRatio.AspectRatio = 1 -- 1:1比例，更偏向竖向
+	aspectRatio.Parent = button
+	
+	-- 创建文本标签显示动画名称
+	local textLabel = Instance.new("TextLabel")
+	textLabel["Name"] = "AnimationName"
+	textLabel["Size"] = UDim2.new(1, 0, 0, 20) -- 底部20像素高度
+	textLabel["Position"] = UDim2.new(0, 0, 1, -20) -- 位于按钮底部
+	textLabel["BackgroundColor3"] = Color3.fromRGB(135, 206, 235) -- 天空蓝背景（与主题一致）
+	textLabel["BackgroundTransparency"] = 0.6 -- 半透明背景
+	textLabel["Text"] = data.name -- 动画名称
+	textLabel["TextColor3"] = Color3.new(1, 1, 1) -- 白色文字
+	textLabel["TextSize"] = 10 -- 小字体
+	textLabel["TextWrapped"] = true -- 文本自动换行
+	textLabel["Font"] = Enum.Font.RobotoMono -- 等宽字体
+	textLabel["BorderSizePixel"] = 0 -- 无边框
+	textLabel["Parent"] = button -- 作为按钮的子元素
+
+	-- 动作按钮圆角
+	local btnCorner = Instance.new("UICorner")
+	btnCorner.CornerRadius = UDim.new(0, 8) -- 圆角大小：8像素
+	btnCorner.Parent = button
+	
+	-- 文本标签圆角（仅底部）
+	local textCorner = Instance.new("UICorner")
+	textCorner.CornerRadius = UDim.new(0, 8) -- 圆角大小：8像素
+	textCorner.Parent = textLabel
+
+	-- 动作按钮回弹效果
+	button["MouseButton1Down"]:Connect(function()
+		if not isDragging then
+			tweenService:Create(button, TweenInfo.new(0.05), {
+				Size = UDim2.new(1, -5, 1, -5) -- 缩小5像素
+			}):Play()
+			clickSound() -- 播放点击音效
+		end
+	end)
+	button["MouseButton1Up"]:Connect(function()
+		if not isDragging then
+			tweenService:Create(button, TweenInfo.new(0.05), {
+				Size = UDim2.new(1, 0, 1, 0)
+			}):Play()
+		end
+	end)
+	button["MouseLeave"]:Connect(function()
+		if not isDragging then
+			tweenService:Create(button, TweenInfo.new(0.05), {
+				Size = UDim2.new(1, 0, 1, 0)
+			}):Play()
+		end
+	end)
+
+	-- 将按钮加入列表（用于搜索过滤）
+	-- table.insert(oldButtons, button) -- 注释掉，改用buttonContainer:GetChildren()
+
+	-- 创建主界面动画按钮执行提示函数
+	local function showMainUIFeedback(animName)
+		-- 按钮高亮效果
+		local originalTransparency = button.BackgroundTransparency
+		button.BackgroundTransparency = 0
+		
+		-- 创建执行提示标签
+		local feedbackLabel = Instance.new("TextLabel")
+		feedbackLabel["Size"] = UDim2.new(1, 0, 0, 20)
+		feedbackLabel["Position"] = UDim2.new(0, 0, 0.5, -10)
+		feedbackLabel["BackgroundColor3"] = Color3.fromRGB(0, 255, 0)
+		feedbackLabel["BackgroundTransparency"] = 0.2
+		feedbackLabel["Text"] = animName .. " 已执行"
+		feedbackLabel["TextColor3"] = Color3.new(1, 1, 1)
+		feedbackLabel["TextSize"] = 12
+		feedbackLabel["Font"] = Enum.Font.RobotoMono
+		feedbackLabel["TextStrokeTransparency"] = 0
+		feedbackLabel["TextStrokeColor3"] = Color3.new(0, 0, 0)
+		feedbackLabel["BorderSizePixel"] = 0
+		feedbackLabel["Parent"] = button
+		
+		local feedbackCorner = Instance.new("UICorner")
+		feedbackCorner.CornerRadius = UDim.new(0, 6)
+		feedbackCorner.Parent = feedbackLabel
+		
+		-- 淡出动画效果
+		local tweenService = game:GetService("TweenService")
+		local fadeInfo = TweenInfo.new(2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+		
+		-- 恢复按钮透明度
+		spawn(function()
+			wait(0.1)
+			button.BackgroundTransparency = originalTransparency
+		end)
+		
+		-- 提示标签淡出
+		local fadeTween = tweenService:Create(feedbackLabel, fadeInfo, {
+			BackgroundTransparency = 1,
+			TextTransparency = 1,
+			TextStrokeTransparency = 1
+		})
+		fadeTween:Play()
+		
+		-- 清理提示标签
+		fadeTween.Completed:Connect(function()
+			feedbackLabel:Destroy()
+		end)
+	end
+
+	-- 按钮点击事件（播放对应动画或打开弹窗）
+	button["MouseButton1Click"]:Connect(function()
+		-- 如果是自定义按钮，打开弹窗而不是播放动画
+		if data.isCustom then
+			-- 显示弹窗打开提示
+			showMainUIFeedback(data.name .. " 弹窗")
+			local popupId = "customPopup1" -- 默认值
+			-- 根据按钮名称确定弹窗ID
+			if data.name == "走路动画包" then
+				popupId = "customPopup1"
+			elseif data.name == "待机动画包" then
+				popupId = "customPopup2"
+			elseif data.name == "跳跃动画包" then
+				popupId = "customPopup3"
+			end
+			local popupTitle = data.name
+			local success, error = pcall(function()
+				createPopupWindow(popupTitle, popupId)
+			end)
+			if not success then
+				-- 弹窗创建失败，静默处理
+			end
+			return
+		end
+		
+		if localplayer.Character then
+			local humanoid = localplayer.Character:FindFirstChildOfClass("Humanoid")
+			if humanoid then
+				-- 显示动画执行提示
+				showMainUIFeedback(data.name)
+				
+				-- 停止所有旧动画（包括走路和静态动作）
+				for animId, track in pairs(activeAnimations) do
+					if track then
+						track:Stop()
+					end
+				end
+				activeAnimations = {}
+				if walkTrack and walkTrack.IsPlaying then
+					walkTrack:Stop()
+				end
+
+				-- 创建动画实例并设置动画ID
+				local animation = Instance.new("Animation")
+				animation.AnimationId = "rbxassetid://" .. data.id
+
+				-- 加载动画并播放（降低权重，不覆盖走路）
+				local animTrack = humanoid:LoadAnimation(animation)
+				animTrack:Play()
+				animTrack.Looped = data.looped
+				animTrack.TimePosition = data.timepos
+				animTrack:AdjustSpeed(data.speed)
+				animTrack:AdjustWeight(1.5) -- 权重从999改为1.5
+
+				activeAnimations[data.id] = animTrack
+				currentStaticTrack = animTrack -- 记录当前静态动作
+
+				-- 如果动画结束后需要冻结角色（如假死、中枪）
+				if data.freezeonend then
+					local connection
+					connection = animTrack.Stopped:Connect(function()
+						if humanoid and humanoid.Parent then
+							humanoid.AutoRotate = false
+							-- 移除限速逻辑，不再设置WalkSpeed = 0
+							humanoid.JumpPower = 0
+						end
+						if connection then
+							connection:Disconnect()
+						end
+					end)
+				end
+			end
+		end
+	end)
+end
+
+-- 批量创建所有动画按钮
+for _, animData in ipairs(animations) do
+	createAnimButton(animData)
+end
+
+-- 动画搜索过滤函数
+local function filterAnimations(inputText)
+	inputText = string.lower(inputText) -- 将输入文本转为小写（不区分大小写）
+
+	-- 如果搜索框为空，显示所有按钮
+	if inputText == "" then
+		for _, button in pairs(buttonContainer:GetChildren()) do
+			if button:IsA("GuiButton") then
+				button.Visible = true
+			end
+		end
+	else
+		-- 如果有搜索内容，按名称、ID或序列号过滤
+		for _, button in pairs(buttonContainer:GetChildren()) do
+			if button:IsA("GuiButton") then
+				local name = (button:GetAttribute("name") or ""):lower()
+				local id = tostring(button:GetAttribute("id") or "")
+				local number = tostring(button:GetAttribute("number") or "")
+				
+				-- 支持按名称、ID或序列号搜索
+				if string.find(name, inputText, 1, true) or string.find(id, inputText, 1, true) or string.find(number, inputText, 1, true) then
+					button.Visible = true
+				else
+					button.Visible = false
+				end
+			end
+		end
+	end
+
+	-- 调整滚动框画布大小（适配显示的按钮）
+	wait(0.1) -- 等待布局更新
+	scrollFrame["CanvasSize"] = UDim2.new(0, 0, 0, buttonLayout["AbsoluteContentSize"]["Y"])
+end
+
+-- 监听搜索框文本变化（实时过滤动画）
+searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+	filterAnimations(searchBox.Text)
+end)
+
+-- 三个动画包按钮的点击事件处理
+-- 1. 走路动画包按钮
+walkButton["MouseButton1Click"]:Connect(function()
+	clickSound() -- 播放点击音效
+	if walkAnimActive then
+		-- 关闭走路动画包
+		walkAnimActive = false
+		walkButton.Text = "开启走路"
+		-- 停止走路动画
+		if walkTrack then
+			if walkTrack.IsPlaying then
+				walkTrack:Stop()
+			end
+			walkTrack:Destroy()
+			walkTrack = nil
+		end
+		-- 重新初始化默认走路动画
+		initWalkAnimation()
+	else
+		-- 开启走路动画包
+		walkAnimActive = true
+		walkButton.Text = "停止走路"
+		-- 触发走路动画包的第一个动画
+		local walkAnimations = {}
+		for _, animData in ipairs(animations) do
+			if animData.category == "走路动画包" then
+				table.insert(walkAnimations, animData)
+			end
+		end
+		if #walkAnimations > 0 then
+			-- 播放第一个走路动画
+			playAnimation(walkAnimations[1])
+		end
+	end
+end)
+
+-- 2. 待机动画包按钮
+idleButton["MouseButton1Click"]:Connect(function()
+	clickSound() -- 播放点击音效
+	if idleAnimActive then
+		-- 关闭待机动画包
+		idleAnimActive = false
+		idleButton.Text = "开启待机"
+		-- 停止待机动画
+		if idleTrack then
+			if idleTrack.IsPlaying then
+				idleTrack:Stop()
+			end
+			idleTrack:Destroy()
+			idleTrack = nil
+			isIdleActive = false
+		end
+	else
+		-- 开启待机动画包
+		idleAnimActive = true
+		idleButton.Text = "停止待机"
+		-- 触发待机动画包的第一个动画
+		local idleAnimations = {}
+		for _, animData in ipairs(animations) do
+			if animData.category == "待机动画包" then
+				table.insert(idleAnimations, animData)
+			end
+		end
+		if #idleAnimations > 0 then
+			-- 播放第一个待机动画
+			playAnimation(idleAnimations[1])
+		end
+	end
+end)
+
+-- 3. 跳跃动画包按钮
+jumpButton["MouseButton1Click"]:Connect(function()
+	clickSound() -- 播放点击音效
+	if jumpAnimActive then
+		-- 关闭跳跃动画包
+		jumpAnimActive = false
+		jumpButton.Text = "开启跳跃"
+		-- 停止跳跃动画
+		if jumpTrack then
+			if jumpTrack.IsPlaying then
+				jumpTrack:Stop()
+			end
+			jumpTrack:Destroy()
+			jumpTrack = nil
+			isJumpActive = false
+		end
+	else
+		-- 开启跳跃动画包
+		jumpAnimActive = true
+		jumpButton.Text = "停止跳跃"
+		-- 触发跳跃动画包的第一个动画
+		local jumpAnimations = {}
+		for _, animData in ipairs(animations) do
+			if animData.category == "跳跃动画包" then
+				table.insert(jumpAnimations, animData)
+			end
+		end
+		if #jumpAnimations > 0 then
+			-- 播放第一个跳跃动画
+			playAnimation(jumpAnimations[1])
+		end
+	end
+end)
+
+-- 「停止所有动作」按钮逻辑（只停止动作，不销毁UI）
+stopAllButton["MouseButton1Click"]:Connect(function()
+	clickSound() -- 播放点击音效
+	-- 1. 停止所有正在播放的自定义动画
+	for animId, track in pairs(activeAnimations) do
+		if track then
+			track:Stop()
+			track:Destroy()
+		end
+	end
+	activeAnimations = {}
+	
+	-- 2. 停止并销毁走路动画
+	if walkTrack then
+		if walkTrack.IsPlaying then
+			walkTrack:Stop()
+		end
+		walkTrack:Destroy()
+		walkTrack = nil
+	end
+	
+	-- 3. 停止并销毁当前静态动作
+	if currentStaticTrack then
+		if currentStaticTrack.IsPlaying then
+			currentStaticTrack:Stop()
+		end
+		currentStaticTrack:Destroy()
+		currentStaticTrack = nil
+	end
+	
+	-- 4. 停止并销毁待机动画
+	if idleTrack then
+		if idleTrack.IsPlaying then
+			idleTrack:Stop()
+		end
+		idleTrack:Destroy()
+		idleTrack = nil
+		isIdleActive = false
+	end
+	
+	-- 5. 停止并销毁跳跃动画
+	if jumpTrack then
+		if jumpTrack.IsPlaying then
+			jumpTrack:Stop()
+		end
+		jumpTrack:Destroy()
+		jumpTrack = nil
+		isJumpActive = false
+	end
+	
+	-- 6. 恢复角色控制
+	if localplayer.Character then
+		local humanoid = localplayer.Character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid.AutoRotate = true 
+			humanoid.JumpPower = 50 
+		end
+	end
+	
+	-- 7. 重置动画包状态为关闭
+	walkAnimActive = false
+	walkButton.Text = "走路包"
+	
+	idleAnimActive = false
+	idleButton.Text = "待机包"
+	
+	jumpAnimActive = false
+	jumpButton.Text = "跳跃包"
+end)
+
+-- 「关闭」按钮逻辑（停止所有动作+销毁UI，修复：彻底解除角色控制）
+closeButton["MouseButton1Click"]:Connect(function()
+	clickSound() -- 播放点击音效
+	-- 1. 停止所有正在播放的自定义动画
+	for animId, track in pairs(activeAnimations) do
+		if track then
+			track:Stop()
+			track:Destroy()
+		end
+	end
+	activeAnimations = {}
+	
+	-- 2. 停止并销毁走路动画
+	if walkTrack then
+		if walkTrack.IsPlaying then
+			walkTrack:Stop()
+		end
+		walkTrack:Destroy()
+		walkTrack = nil
+	end
+	
+	-- 3. 停止并销毁当前静态动作
+	if currentStaticTrack then
+		if currentStaticTrack.IsPlaying then
+			currentStaticTrack:Stop()
+		end
+		currentStaticTrack:Destroy()
+		currentStaticTrack = nil
+	end
+	
+	-- 3.1 停止并销毁待机动画
+	if idleTrack then
+		if idleTrack.IsPlaying then
+			idleTrack:Stop()
+		end
+		idleTrack:Destroy()
+		idleTrack = nil
+		isIdleActive = false
+	end
+	
+	-- 3.2 停止并销毁跳跃动画
+	if jumpTrack then
+		if jumpTrack.IsPlaying then
+			jumpTrack:Stop()
+		end
+		jumpTrack:Destroy()
+		jumpTrack = nil
+		isJumpActive = false
+	end
+	
+	-- 4. 恢复角色控制
+	if localplayer.Character then
+		local humanoid = localplayer.Character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid.AutoRotate = true 
+			-- 移除限速逻辑，不再强制设置WalkSpeed
+			humanoid.JumpPower = 50 
+		end
+	end
+
+	-- 5. 断开移动检测连接
+	if movementConnection then
+		movementConnection:Disconnect()
+		movementConnection = nil
+	end
+	
+	-- 5.1 断开跳跃检测连接
+	if jumpConnection then
+		jumpConnection:Disconnect()
+		jumpConnection = nil
+	end
+	
+	-- 6. 关闭所有弹出窗口
+	for windowId, window in pairs(popupWindows) do
+		if window and window.Parent then
+			window:Destroy()
+		end
+	end
+	popupWindows = {}
+	
+	-- 7. 销毁整个UI
+	gui:Destroy()
+end)
+
+-- 核心：最小化/最大化切换逻辑（完全独立的两个UI元素）
+local isMinimized = false -- 是否处于最小化状态
+
+-- 使用全局定义的位置变量
+
+-- 创建全新的最小化按钮图标（完全按照动作2的Open按钮样式）
+local newMinimizeIcon = Instance.new("TextButton")
+newMinimizeIcon.Name = "NewMinimizeIcon"
+newMinimizeIcon.Parent = gui
+newMinimizeIcon.Draggable = true -- 可拖拽（来自动作2）
+newMinimizeIcon.Size = UDim2.new(0.06, 0, 0.137, 0) -- 尺寸（来自动作2）
+newMinimizeIcon.Position = UDim2.new(0.1, 0, 0.2, 0) -- 向下移动
+newMinimizeIcon.Text = "关闭" -- 初始文本（来自动作2）
+newMinimizeIcon.BackgroundColor3 = Color3.fromRGB(135, 206, 235) -- 天空蓝背景（与主题一致）
+newMinimizeIcon.TextColor3 = Color3.fromRGB(255, 255, 255) -- 白色文字（来自动作2）
+newMinimizeIcon.TextScaled = true -- 文字自适应（来自动作2）
+newMinimizeIcon.TextSize = 20 -- 字体大小（来自动作2）
+newMinimizeIcon.Visible = true -- 默认显示
+newMinimizeIcon.BackgroundTransparency = 0.6 -- 透明度40%，更透明
+
+-- 按钮点击控制函数（来自动作2的toggleUI逻辑，添加动画效果和全局窗口控制）
+local function toggleNewMinimizeUI()
+    if newMinimizeIcon.Text == "打开" then
+        newMinimizeIcon.Text = "关闭"
+        -- 最大化动画：从最小化按钮位置展开到主框架
+        mainFrame.Position = newMinimizeIcon.Position
+        mainFrame.Size = UDim2.new(0, 30, 0, 30) -- 从按钮大小开始
+        mainFrame.Visible = true
+        
+        -- 创建展开动画
+        local expandTween = tweenService:Create(mainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+            Position = mainFramePosition,
+            Size = UDim2.new(0, 320, 0, 240)
+        })
+        expandTween:Play()
+        
+        -- 同时展开所有弹出窗口
+        for windowId, window in pairs(popupWindows) do
+            if window and window.Parent then
+                window.Visible = true
+            end
         end
-    end
-
-    -- 运动检测循环
-    local running = true
-    local lastMoving = false
-    local normalRates = {IceRing = 35, IceCrystals = 60, IceShards = 45}
-    local idleRates = {IceRing = 7, IceCrystals = 12, IceShards = 9}
-
-    -- 如果已有旧循环，先关闭
-    if characterParticleStates[character] and characterParticleStates[character].disconnect then
-        characterParticleStates[character].disconnect()
-    end
-
-    -- 运动检测函数
-    local function updateRates()
-        if not running then return end
-        if not root.Parent then return end
-        local velocity = root.Velocity
-        local moving = (velocity.Magnitude > 1.5)
-        if moving ~= lastMoving then
-            lastMoving = moving
-            for name, emitter in emitters do
-                if emitter then
-                    emitter.Rate = moving and normalRates[name] or idleRates[name]
+    else
+        if newMinimizeIcon.Text == "关闭" then
+            newMinimizeIcon.Text = "打开"
+            -- 最小化动画：从主框架收缩到最小化按钮位置
+            mainFramePosition = mainFrame.Position -- 保存当前位置
+            
+            local shrinkTween = tweenService:Create(mainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+                Position = newMinimizeIcon.Position,
+                Size = UDim2.new(0, 30, 0, 30)
+            })
+            shrinkTween:Play()
+            
+            -- 动画完成后隐藏主框架
+            shrinkTween.Completed:Connect(function()
+                mainFrame.Visible = false
+            end)
+            
+            -- 同时收拢所有弹出窗口
+            for windowId, window in pairs(popupWindows) do
+                if window and window.Parent then
+                    window.Visible = false
                 end
             end
         end
     end
-
-    -- 循环检测
-    local stopped = false
-    local function loop()
-        while running and root.Parent and not stopped do
-            updateRates()
-            task.wait(0.25)
-        end
-    end
-
-    local loopThread = coroutine.create(loop)
-    coroutine.resume(loopThread)
-
-    -- 保存断开函数和发射器引用
-    characterParticleStates[character] = {
-        disconnect = function()
-            running = false
-            stopped = true
-        end,
-        emitters = emitters,
-        attachment = footAttachment
-    }
 end
 
-local function removeIceParticle(character)
-    local root = character:FindFirstChild("HumanoidRootPart")
-    if root then
-        local footAttachment = root:FindFirstChild("IceFootAttachment")
-        if footAttachment then
-            footAttachment:Destroy()
-        end
-    end
-    -- 停止运动检测循环
-    if characterParticleStates[character] and characterParticleStates[character].disconnect then
-        characterParticleStates[character].disconnect()
-    end
-    characterParticleStates[character] = nil
-end
+-- 按钮点击事件（来自动作2）
+newMinimizeIcon.MouseButton1Up:Connect(toggleNewMinimizeUI)
 
--- 全局控制函数，供UI调用
-getgenv().IceBreakParticle.Enabled = false
-getgenv().IceBreakParticle.CreateParticles = createIceParticle
-getgenv().IceBreakParticle.RemoveParticles = removeIceParticle
-
--- 角色生成时的处理
-local function onCharacterAdded(character)
-    -- 等待角色完全加载
-    character:WaitForChild("HumanoidRootPart")
-    task.wait(1) -- 确保角色完全加载
+-- 添加键盘F键快捷键控制（修改为F键）
+userInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
     
-    -- 如果粒子系统已启用，为新角色创建粒子
-    if getgenv().IceBreakParticle.Enabled then
-        createIceParticle(character)
+    if input.KeyCode == Enum.KeyCode.F then
+        toggleNewMinimizeUI()
     end
+end)
+
+-- 按钮圆角（来自动作2的完全圆角样式）
+local newMinimizeIconCorner = Instance.new("UICorner")
+newMinimizeIconCorner.Name = "UICorner"
+newMinimizeIconCorner.Parent = newMinimizeIcon
+newMinimizeIconCorner.CornerRadius = UDim.new(1, 0) -- 完全圆角（来自动作2）
+
+-- 保留原有的最小化图标（重命名以避免冲突）
+local minimizeIcon = Instance.new("TextButton")
+minimizeIcon["Name"] = "MinimizeIcon"
+minimizeIcon["Size"] = UDim2.new(0, 30, 0, 30) -- 固定30x30尺寸
+minimizeIcon["Position"] = minimizeIconPosition -- 使用独立的位置变量
+minimizeIcon["BackgroundColor3"] = Color3.fromRGB(135, 206, 235) -- 天空蓝背景（与主题一致）
+minimizeIcon["Text"] = "关闭" -- 使用动作2的Open按钮初始文本
+minimizeIcon["TextColor3"] = Color3.fromRGB(255, 255, 255) -- 白色文字（来自动作2）
+minimizeIcon["TextSize"] = 20 -- 字体大小（来自动作2）
+minimizeIcon["TextScaled"] = true -- 文字自适应（来自动作2）
+minimizeIcon["Font"] = Enum.Font.RobotoMono -- 等宽字体
+minimizeIcon["BorderSizePixel"] = 0 -- 无边框
+minimizeIcon["BackgroundTransparency"] = 0.4 -- 透明度40%，更透明
+minimizeIcon["Parent"] = gui -- 直接作为gui的子元素，与mainFrame同级
+minimizeIcon["Visible"] = false -- 初始隐藏
+-- 图标按钮圆角（来自动作2的圆角样式）
+local minimizeIconCorner = Instance.new("UICorner")
+minimizeIconCorner.CornerRadius = UDim.new(1, 0) -- 完全圆角（来自动作2）
+minimizeIconCorner.Parent = minimizeIcon
+
+-- 1. 移除顶部栏最小化按钮点击事件处理
+
+-- 2. 最小化图标按钮点击：触发最大化（拖拽时不触发）
+minimizeIcon["MouseButton1Click"]:Connect(function()
+	if not isDragging then
+		isMinimized = false
+		-- 隐藏最小化图标，保存其当前位置
+		minimizeIconPosition = minimizeIcon["Position"]
+		minimizeIcon["Visible"] = false
+		-- 显示主框架（最大化UI），恢复其之前保存的位置
+		mainFrame["Position"] = mainFramePosition
+		mainFrame["Visible"] = true
+		clickSound() -- 播放点击音效
+	end
+end)
+
+-- 最小化图标按钮回弹效果（拖拽时禁用）
+minimizeIcon["MouseButton1Down"]:Connect(function()
+	if not isDragging then
+		tweenService:Create(minimizeIcon, TweenInfo.new(0.05), {
+			Size = UDim2.new(0, 28, 0, 28) -- 按下时缩小2px
+		}):Play()
+		clickSound() -- 播放点击音效
+	end
+end)
+minimizeIcon["MouseButton1Up"]:Connect(function()
+	if not isDragging then
+		tweenService:Create(minimizeIcon, TweenInfo.new(0.05), {
+			Size = UDim2.new(0, 30, 0, 30)
+		}):Play()
+	end
+end)
+minimizeIcon["MouseLeave"]:Connect(function()
+	if not isDragging then
+		tweenService:Create(minimizeIcon, TweenInfo.new(0.05), {
+			Size = UDim2.new(0, 30, 0, 30)
+		}):Play()
+	end
+end)
+
+-- 最小化图标独立的拖拽逻辑
+minimizeIcon["InputBegan"]:Connect(function(input)
+	if (input["UserInputType"] == Enum.UserInputType.MouseButton1 or input["UserInputType"] == Enum.UserInputType.Touch) then 
+		isDragging = true 
+		dragStartPos = input["Position"] 
+		uiStartPos = minimizeIcon["Position"] 
+		input["Changed"]:Connect(function()
+			if input["UserInputState"] == Enum.UserInputState.End then
+				isDragging = false 
+				-- 拖拽结束时，保存最小化图标的当前位置
+				minimizeIconPosition = minimizeIcon["Position"]
+			end
+		end)
+	end
+end)
+
+-- 更新拖拽位置的通用函数（支持两个独立UI元素）
+function updateDragPosition(input)
+	if not isDragging then return end -- 非拖拽状态直接返回
+	local deltaPos = input["Position"] - dragStartPos -- 位置变化量
+	local newPosition = UDim2.new(
+		uiStartPos["X"]["Scale"], uiStartPos["X"]["Offset"] + deltaPos["X"],
+		uiStartPos["Y"]["Scale"], uiStartPos["Y"]["Offset"] + deltaPos["Y"]
+	)
+	
+	-- 根据当前状态更新对应的UI元素位置
+	if isMinimized then
+		minimizeIcon["Position"] = newPosition
+	else
+		mainFrame["Position"] = newPosition
+	end
 end
 
--- 监听玩家角色生成
-local LocalPlayer = game.Players.LocalPlayer
-if LocalPlayer.Character then
-    onCharacterAdded(LocalPlayer.Character)
-end
-LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
+-- 滚动框自适应逻辑（按钮数量变化时，自动调整滚动范围）
+buttonLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+	buttonContainer["Size"] = UDim2.new(1, -10, 0, buttonLayout["AbsoluteContentSize"]["Y"])
+	scrollFrame["CanvasSize"] = UDim2.new(0, 0, 0, buttonLayout["AbsoluteContentSize"]["Y"])
+end)
 
-print("踏破寒冰粒子系统已加载 - 通过UI控制启用/禁用")
+-- 新增模块：走路动画控制（核心功能）
+local function initWalkAnimation()
+	if localplayer.Character then
+		local humanoid = localplayer.Character:FindFirstChildOfClass("Humanoid")
+		if humanoid and not walkTrack then
+			-- 使用Roblox默认R15走路动画（可替换为自定义ID）
+		local walkAnim = Instance.new("Animation")
+		walkAnim.AnimationId = "rbxassetid://1070017263"   
+--带跳走路507777826
+--经典走路107806791584829
+--妖娆走路 1070017263
+			walkTrack = humanoid:LoadAnimation(walkAnim)
+			walkTrack.Looped = true
+			walkTrack:AdjustWeight(3) -- 走路权重高于静态动作，与弹窗设置保持一致
+		end
+	end
+end
+
+-- 监听角色重生，重新初始化走路动画
+localplayer.CharacterAdded:Connect(initWalkAnimation)
+-- 首次加载角色时初始化
+initWalkAnimation()
+
+-- 监听移动输入，实现「移动播走路/停止恢复静态动作」以及待机动画系统
+local function checkMovementState()
+	if not localplayer.Character then return end
+	local humanoid = localplayer.Character:FindFirstChildOfClass("Humanoid")
+	if not humanoid or not walkTrack then return end
+
+	-- 根据角色移动方向判断是否在移动
+	local isMoving = humanoid.MoveDirection.Magnitude > 0
+	local currentTime = tick()
+	
+	if isMoving then
+		-- 移动中：更新移动时间，停止待机和静态动作，播放走路动画
+		lastMovementTime = currentTime
+		
+		-- 停止待机动画
+		if isIdleActive and idleTrack and idleTrack.IsPlaying then
+			idleTrack:Stop()
+			isIdleActive = false
+		end
+		
+		-- 停止静态动作
+		if currentStaticTrack and currentStaticTrack.IsPlaying then
+			currentStaticTrack:Stop()
+		end
+		
+		-- 播放走路动画
+		if not walkTrack.IsPlaying then
+			walkTrack:Play()
+		end
+	else
+		-- 停止移动：停止走路动画，检查是否需要播放待机动画
+		if walkTrack.IsPlaying then
+			walkTrack:Stop()
+		end
+		
+		-- 检查待机动画触发条件（8秒无移动）
+		if idleTrack and not isIdleActive and (currentTime - lastMovementTime) >= 8 then
+			-- 停止静态动作，播放待机动画
+			if currentStaticTrack and currentStaticTrack.IsPlaying then
+				currentStaticTrack:Stop()
+			end
+			
+			idleTrack:Play()
+			isIdleActive = true
+		elseif not isIdleActive then
+			-- 未达到待机条件，恢复静态动作
+			if currentStaticTrack and not currentStaticTrack.IsPlaying then
+				currentStaticTrack:Play()
+			end
+		end
+	end
+end
+
+-- 跳跃检测函数：检测人物失控或在空中状态
+local function checkJumpState()
+	if not localplayer.Character or not jumpTrack then return end
+	local humanoid = localplayer.Character:FindFirstChildOfClass("Humanoid")
+	local rootPart = localplayer.Character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or not rootPart then return end
+	
+	-- 检测人物是否在空中（失控状态）
+	local isInAir = false
+	local raycast = workspace:Raycast(rootPart.Position, Vector3.new(0, -10, 0))
+	if not raycast then
+		isInAir = true -- 没有检测到地面，说明在空中
+	end
+	
+	-- 检测人物是否失控（PlatformStand状态或跳跃状态）
+	local isOutOfControl = humanoid.PlatformStand or humanoid:GetState() == Enum.HumanoidStateType.Freefall or humanoid:GetState() == Enum.HumanoidStateType.Jumping
+	
+	-- 如果在空中或失控，且没有播放跳跃动画，则播放
+	if (isInAir or isOutOfControl) and not isJumpActive then
+		-- 停止其他动画
+		if idleTrack and idleTrack.IsPlaying then
+			idleTrack:Stop()
+			isIdleActive = false
+		end
+		if currentStaticTrack and currentStaticTrack.IsPlaying then
+			currentStaticTrack:Stop()
+		end
+		
+		-- 播放跳跃动画
+		jumpTrack:Play()
+		isJumpActive = true
+	-- 如果着地且不失控，停止跳跃动画
+	elseif not isInAir and not isOutOfControl and isJumpActive then
+		jumpTrack:Stop()
+		isJumpActive = false
+	end
+end
+
+-- 移动检测连接（存入变量，便于关闭时断开）
+movementConnection = runService.RenderStepped:Connect(checkMovementState)
+
+-- 跳跃检测连接（存入变量，便于关闭时断开）
+jumpConnection = runService.RenderStepped:Connect(checkJumpState)
+
+-- 交互按钮已移动到滚动区域，点击事件已集成到createAnimButton函数中
+
+-- 所有函数定义完成后，连接输入事件
+connectInputEvents()
+
+-- 创建右下角启动提示
+local function showStartupNotification()
+	-- 创建提示框架
+	local notificationFrame = Instance.new("Frame")
+	notificationFrame.Name = "StartupNotification"
+	notificationFrame.Size = UDim2.new(0, 150, 0, 60)
+	notificationFrame.Position = UDim2.new(1, -80, 1, -100) -- 右下角位置
+	notificationFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+	notificationFrame.BackgroundTransparency = 0.2
+	notificationFrame.BorderSizePixel = 0
+	notificationFrame.Parent = gui
+	
+	-- 添加圆角
+	local notificationCorner = Instance.new("UICorner")
+	notificationCorner.CornerRadius = UDim.new(0, 10)
+	notificationCorner.Parent = notificationFrame
+	
+	-- 添加渐变背景
+	local notificationGradient = Instance.new("UIGradient")
+	notificationGradient.Color = ColorSequence.new{
+		ColorSequenceKeypoint.new(0.0, Color3.fromRGB(135, 206, 235)), -- 天空蓝
+		ColorSequenceKeypoint.new(1.0, Color3.fromRGB(70, 130, 180))   -- 深天空蓝
+	}
+	notificationGradient.Rotation = 45
+	notificationGradient.Parent = notificationFrame
+	
+	-- 创建主要文本
+	local mainText = Instance.new("TextLabel")
+	mainText.Size = UDim2.new(1, -10, 0, 30)
+	mainText.Position = UDim2.new(0, 5, 0, 5)
+	mainText.BackgroundTransparency = 1
+	mainText.Text = "-- 动画包已加载完成 --"
+	mainText.TextColor3 = Color3.new(1, 1, 1)
+	mainText.TextSize = 16
+	mainText.Font = Enum.Font.RobotoMono
+	mainText.TextStrokeTransparency = 0
+	mainText.TextStrokeColor3 = Color3.new(0, 0, 0)
+	mainText.Parent = notificationFrame
+	
+	-- 创建快捷键提示文本
+	local shortcutText = Instance.new("TextLabel")
+	shortcutText.Size = UDim2.new(1, -10, 0, 20)
+	shortcutText.Position = UDim2.new(0, 5, 0, 35)
+	shortcutText.BackgroundTransparency = 1
+	shortcutText.Text = "快捷键按 'F' 开关"
+	shortcutText.TextColor3 = Color3.fromRGB(255, 255, 0) -- 黄色突出显示
+	shortcutText.TextSize = 12
+	shortcutText.Font = Enum.Font.RobotoMono
+	shortcutText.TextStrokeTransparency = 0
+	shortcutText.TextStrokeColor3 = Color3.new(0, 0, 0)
+	shortcutText.Parent = notificationFrame
+	
+	-- 从右侧滑入动画
+	local slideInTween = tweenService:Create(notificationFrame, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+		Position = UDim2.new(1, -160, 1, -80)
+	})
+	
+	-- 初始位置设为屏幕外
+	notificationFrame.Position = UDim2.new(1, 50, 1, -80)
+	slideInTween:Play()
+	
+	-- 3秒后淡出并销毁
+	spawn(function()
+		wait(8)
+		local fadeOutTween = tweenService:Create(notificationFrame, TweenInfo.new(1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			BackgroundTransparency = 1,
+			Position = UDim2.new(1, 50, 1, -80) -- 滑出到右侧
+		})
+		
+		local textFadeOut1 = tweenService:Create(mainText, TweenInfo.new(1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			TextTransparency = 1,
+			TextStrokeTransparency = 1
+		})
+		
+		local textFadeOut2 = tweenService:Create(shortcutText, TweenInfo.new(1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			TextTransparency = 1,
+			TextStrokeTransparency = 1
+		})
+		
+		fadeOutTween:Play()
+		textFadeOut1:Play()
+		textFadeOut2:Play()
+		
+		fadeOutTween.Completed:Connect(function()
+			notificationFrame:Destroy()
+		end)
+	end)
+end
+
+-- 延迟显示启动提示（确保UI完全加载后显示）
+spawn(function()
+	wait(1) -- 等待1秒确保所有UI元素加载完成
+	showStartupNotification()
+end)
+
+-- 脚本启动时自动播放所有默认开启的动画包
+if walkAnimActive then
+	local walkAnimations = {}
+	for _, animData in ipairs(animations) do
+		if animData.category == "走路动画包" then
+			table.insert(walkAnimations, animData)
+		end
+	end
+	if #walkAnimations > 0 then
+		-- 播放第一个走路动画
+		playAnimation(walkAnimations[1])
+	end
+end
+
+if idleAnimActive then
+	local idleAnimations = {}
+	for _, animData in ipairs(animations) do
+		if animData.category == "待机动画包" then
+			table.insert(idleAnimations, animData)
+		end
+	end
+	if #idleAnimations > 0 then
+		-- 播放第一个待机动画
+		playAnimation(idleAnimations[1])
+	end
+end
+
+if jumpAnimActive then
+	local jumpAnimations = {}
+	for _, animData in ipairs(animations) do
+		if animData.category == "跳跃动画包" then
+			table.insert(jumpAnimations, animData)
+		end
+	end
+	if #jumpAnimations > 0 then
+		-- 播放第一个跳跃动画
+		playAnimation(jumpAnimations[1])
+	end
+end
