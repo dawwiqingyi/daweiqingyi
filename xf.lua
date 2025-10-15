@@ -338,7 +338,7 @@ end
 
 local stopFling = function()
     if not isFlinging then
-        Message("提示", "未在甩飞中，无需关闭", 2)
+        Message("提示", "甩飞吸附系统已退出！", 2)
         return
     end
 
@@ -399,7 +399,7 @@ local mainFrame = Instance.new("Frame")
 mainFrame.Size = UDim2.new(0.25, 0, 0.7, 0) -- 减小宽度
 mainFrame.Position = UDim2.new(0.05, 0, 0.16, 0) -- 保持原始位置
 mainFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-mainFrame.BackgroundTransparency = 0.2 -- 标题栏透明度20%
+mainFrame.BackgroundTransparency = 0.3 -- 标题栏透明度20%
 mainFrame.AnchorPoint = Vector2.new(0, 0)
 mainFrame.BorderSizePixel = 0
 mainFrame.Parent = screenGui
@@ -437,11 +437,11 @@ mainFrame.InputChanged:Connect(function(input)
     end
 end)
 
--- 最小化/最大化切换按钮
+-- 最小化/最大化切换按钮（向X按钮靠拢）
 local toggleBtn = Instance.new("TextButton")
-toggleBtn.Size = UDim2.new(0, 25, 0, 25)
+toggleBtn.Size = UDim2.new(0, 20, 0, 20) -- 保持20x20尺寸
 toggleBtn.AnchorPoint = Vector2.new(1, 0)
-toggleBtn.Position = UDim2.new(1, -40, 0, 4) -- 进一步靠右
+toggleBtn.Position = UDim2.new(1, -23, 0, 6) -- 从-22改为-18，向右移动4单位靠拢X按钮
 local isMinimized = false
 local function updateToggleButton()
     if isMinimized then
@@ -460,14 +460,14 @@ toggleBtn.BorderSizePixel = 0
 toggleBtn.Font = Enum.Font.SourceSansBold
 toggleBtn.Parent = mainFrame
 local toggleCorner = Instance.new("UICorner")
-toggleCorner.CornerRadius = UDim.new(0, 12)
+toggleCorner.CornerRadius = UDim.new(0, 10) -- 保持圆角
 toggleCorner.Parent = toggleBtn
 
--- 关闭按钮（X按钮）
+-- 关闭按钮（X按钮，向左挪动）
 local closeBtn = Instance.new("TextButton")
-closeBtn.Size = UDim2.new(0, 25, 0, 25)
+closeBtn.Size = UDim2.new(0, 20, 0, 20) -- 保持20x20尺寸
 closeBtn.AnchorPoint = Vector2.new(1, 0)
-closeBtn.Position = UDim2.new(1, -10, 0, 4) -- 进一步靠右
+closeBtn.Position = UDim2.new(1, -2, 0, 6) -- 从3改为-2，向左挪动5单位
 closeBtn.Text = "X"
 closeBtn.TextScaled = true
 closeBtn.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
@@ -477,7 +477,7 @@ closeBtn.BorderSizePixel = 0
 closeBtn.Font = Enum.Font.SourceSansBold
 closeBtn.Parent = mainFrame
 local closeCorner = Instance.new("UICorner")
-closeCorner.CornerRadius = UDim.new(0, 12)
+closeCorner.CornerRadius = UDim.new(0, 10) -- 保持圆角
 closeCorner.Parent = closeBtn
 
 -- 关闭按钮点击事件
@@ -494,11 +494,9 @@ closeBtn.MouseButton1Click:Connect(function()
     screenGui:Destroy()
 end)
 
-
 -- 标题标签
 local titleLabel = Instance.new("TextLabel")
-titleLabel.Size = UDim2.new(1, -65, 0, 30) -- 调整宽度以适应进一步靠右的按钮
-
+titleLabel.Size = UDim2.new(1, -65, 0, 30) -- 保持原有宽度适配
 titleLabel.Position = UDim2.new(0, 6, 0, 0)
 titleLabel.BackgroundTransparency = 1
 titleLabel.Text = "吸附甩飞系统"
@@ -636,7 +634,7 @@ local flingTargetFrame = Instance.new("Frame")
 flingTargetFrame.Size = UDim2.new(0.765, -12, 0, 25.5) -- 减小15%
 flingTargetFrame.Position = UDim2.new(0, 6, 0, 0.49)
 flingTargetFrame.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
-flingTargetFrame.BackgroundTransparency = 0.5 -- 设置半透明
+flingTargetFrame.BackgroundTransparency = 0 -- 设置半透明
 flingTargetFrame.BorderSizePixel = 0
 flingTargetFrame.Parent = mainFrame
 local flingTargetCorner = Instance.new("UICorner")
@@ -741,8 +739,8 @@ flingArrowBtn.MouseButton1Click:Connect(function()
                 nameLabel.TextColor3 = Color3.fromRGB(0, 255, 156)
                 nameLabel.TextXAlignment = Enum.TextXAlignment.Left
                 nameLabel.TextScaled = false
-                nameLabel.TextSize = 12 -- 略微减小字体
-                nameLabel.Font = Enum.Font.SourceSans
+                nameLabel.TextSize = 17 -- 略微减小字体
+                nameLabel.Font = Enum.Font.SourceSansBold 
                 nameLabel.Parent = optBtn
             else
                 local nameLabel = Instance.new("TextLabel")
@@ -887,12 +885,12 @@ local function toggleMinimize()
         isMinimized = false
         mainFrame.Size = originalSize
         
-        -- 更新按钮状态和位置
-        updateToggleButton()
-        toggleBtn.Position = UDim2.new(1, -40, 0, 4)
-        closeBtn.Position = UDim2.new(1, -10, 0, 4)
+        -- 恢复正常状态的按钮位置（同步调整后位置）
+        toggleBtn.Position = UDim2.new(1, -23, 0, 6)
+        closeBtn.Position = UDim2.new(1, -2, 0, 6)
         
-        -- 恢复原始大小和可见性
+        -- 其他原有逻辑
+        updateToggleButton()
         attachPlayerScroll.Size = UDim2.new(1, -12, 0.35, 0)
         attachPlayerScroll.Visible = true
         divider.Visible = true
@@ -914,11 +912,12 @@ local function toggleMinimize()
         originalSize = mainFrame.Size
         mainFrame.Size = UDim2.new(0.25, 0, 0.15, 0) -- 调整最小化高度和宽度，确保按钮可见
         
-        -- 更新按钮状态和位置
-        updateToggleButton()
-        toggleBtn.Position = UDim2.new(1, -40, 0, 4)
-        closeBtn.Position = UDim2.new(1, -10, 0, 4)
+        -- 最小化状态的按钮位置（同步调整后位置）
+        toggleBtn.Position = UDim2.new(1, -23, 0, 6)
+        closeBtn.Position = UDim2.new(1, -2, 0, 6)
         
+        -- 其他原有逻辑
+        updateToggleButton()
         divider.Visible = false
         flingTitle.Visible = false
         flingTargetFrame.Visible = false
