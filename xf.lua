@@ -2,18 +2,22 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
-local UserInputService = game:GetService("UserInputService") -- 新增：用于全局输入处理
+local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 
--- 吸附逻辑变量（不变）
 local isAttaching = false
 local targetPlayer = nil
 local attachConnection = nil
 local maxAttachDistance = 9999000
 local backOffset = 0.5
+
+local isFlinging = false
+local flingConnection = nil
+local selectedTarget = "全部"
+getgenv().FPDH = workspace.FallenPartsDestroyHeight
+
 local cleanupList = {connections = {}}
 
--- 获取角色根部件（不变）
 local function getRoot()
     if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
         return LocalPlayer.Character.HumanoidRootPart
@@ -21,153 +25,43 @@ local function getRoot()
     return nil
 end
 
--- 创建ScreenGui（不变）
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "PlayerAttachUI"
-screenGui.IgnoreGuiInset = true
-screenGui.ResetOnSpawn = false
-screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
-
--- ====================== 主框架 ======================
-local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0.22, 0, 0.6, 0) -- 缩小宽度+加高高度
-mainFrame.Position = UDim2.new(0.05, 0, 0.16, 0) -- 初始位置
-mainFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-mainFrame.AnchorPoint = Vector2.new(0, 0)
-mainFrame.BorderSizePixel = 0
-mainFrame.Parent = screenGui
-local mainCorner = Instance.new("UICorner")
-mainCorner.CornerRadius = UDim.new(0, 18)
-mainCorner.Parent = mainFrame
-
--- 拖动状态变量
-local dragging = false
-local dragStart = Vector2.new()
-local startPos = mainFrame.Position
-
--- 拖动逻辑
-mainFrame.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = true
-        dragStart = input.Position
-        startPos = mainFrame.Position
+local GetPlayer = function(Name)
+    if Name == "全部" then
+        return "全部"
+    elseif Name == "随机" then
+        local allPlayers = Players:GetPlayers()
+        table.remove(allPlayers, table.find(allPlayers, LocalPlayer))
+        return #allPlayers > 0 and allPlayers[math.random(#allPlayers)] or nil
     end
-end)
-
--- 结束拖动时的处理（只保留一个事件处理函数）
-mainFrame.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = false
-        -- 移除input:Consume()，输入结束时无需阻止传递
-    end
-end)
-
--- 拖动过程中的处理
-mainFrame.InputChanged:Connect(function(input)
-    if dragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
-        local delta = input.Position - dragStart
-        mainFrame.Position = UDim2.new(
-            startPos.X.Scale,
-            startPos.X.Offset + delta.X,
-            startPos.Y.Scale,
-            startPos.Y.Offset + delta.Y
-        )
-    end
-end)
-
--- 4. 框架内拖动结束处理（备用）
-mainFrame.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        if dragging then
-            dragging = false
-            isDraggingFromFrame = false
-            mainFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-        end
-    end
-end)
-
--- ====================== 原有UI元素（只保留最小化按钮） ======================
--- 最小化按钮（调整位置到右上角，统一+号和-号大小）
-local minimizeBtn = Instance.new("TextButton")
-minimizeBtn.Size = UDim2.new(0, 25, 0, 25) -- 固定30x30像素，确保+号和-号大小一致
-minimizeBtn.AnchorPoint = Vector2.new(1, 0)
-minimizeBtn.Position = UDim2.new(1, -4, 0, 4) -- 原关闭按钮位置
-minimizeBtn.Text = "-"
-minimizeBtn.TextScaled = true
-minimizeBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
-minimizeBtn.TextColor3 = Color3.fromRGB(255,255,255)
-minimizeBtn.BorderSizePixel = 0
-minimizeBtn.Parent = mainFrame
-local minimizeCorner = Instance.new("UICorner")
-minimizeCorner.CornerRadius = UDim.new(0, 12)
-minimizeCorner.Parent = minimizeBtn
-
-local playerScroll = Instance.new("ScrollingFrame")
-playerScroll.Size = UDim2.new(1, -12, 0.75, 0) -- 恢复原始高度
-playerScroll.Position = UDim2.new(0, 6, 0, 35) -- 直接紧贴标题下方
-playerScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-playerScroll.BackgroundTransparency = 1
-playerScroll.ScrollBarThickness = 6
-playerScroll.BorderSizePixel = 0
-playerScroll.Parent = mainFrame
-
--- 存储玩家按钮（不变）
-local playerButtons = {}
--- 当前选择的玩家（不变）
-local selectedPlayer = nil
--- 最小化状态
-local isMinimized = false
-local originalSize = mainFrame.Size
-local originalPosition = mainFrame.Position
-
--- 透明度状态
-local transparencyLevel = 0 -- 0=不透明, 1=50%透明, 2=90%透明
-local transparencyValues = {0, 0.5, 0.8}
-
--- 透明度切换功能
-local function toggleTransparency()
-    transparencyLevel = (transparencyLevel + 1) % 3
-    local transparency = transparencyValues[transparencyLevel + 1]
     
-    -- 递归设置所有UI元素的透明度
-    local function setElementTransparency(element, alpha)
-        if element:IsA("Frame") or element:IsA("TextButton") then
-            if alpha == 0 then
-                if element == mainFrame then
-                    element.BackgroundTransparency = 0
-                elseif element.Name:find("Btn") or element:IsA("TextButton") then
-                    element.BackgroundTransparency = 0
-                else
-                    element.BackgroundTransparency = element.BackgroundTransparency
-                end
-            else
-                element.BackgroundTransparency = math.min(0.95, alpha)
-            end
-        end
-        
-        if element:IsA("TextLabel") or element:IsA("TextButton") then
-            element.TextTransparency = alpha
-        end
-        
-        if element:IsA("ImageLabel") then
-            element.ImageTransparency = alpha
-        end
-        
-        -- 递归处理子元素
-        for _, child in pairs(element:GetChildren()) do
-            if child:IsA("GuiObject") then
-                setElementTransparency(child, alpha)
+    local cleanName = Name
+    local usernameMatch = Name:match("%((.-)%)")
+    if usernameMatch then
+        cleanName = usernameMatch
+    end
+    
+    cleanName = cleanName:lower()
+    
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            local playerName = player.Name:lower()
+            local displayName = player.DisplayName:lower()
+            if playerName == cleanName or displayName == cleanName or playerName:match("^"..cleanName) or displayName:match("^"..cleanName) then
+                return player
             end
         end
     end
-    
-    -- 应用透明度到整个UI
-    setElementTransparency(mainFrame, transparency)
+    return nil
 end
 
--- 最小化功能将在UI元素创建后定义
+local Message = function(Title, Text, Time)
+    game:GetService("StarterGui"):SetCore("SendNotification", {
+        Title = Title,
+        Text = Text,
+        Duration = Time or 3
+    })
+end
 
--- 背部吸附功能核心函数（不变）
 local function findNearestPlayer()
     local root = getRoot()
     if not root then return nil end
@@ -261,16 +155,325 @@ local function toggleAttach(enabled, player)
     end
 end
 
--- 更新在线玩家状态显示
--- 创建玩家选择按钮（添加无玩家提示）
-local function refreshPlayerList()
+local SkidFling = function(TargetPlayer)
+    if not isFlinging then return end
+
+    local LocalChar = LocalPlayer.Character
+    local LocalHumanoid = LocalChar and LocalChar:FindFirstChildOfClass("Humanoid")
+    local LocalRoot = LocalHumanoid and LocalHumanoid.RootPart
+
+    if not (LocalChar and LocalHumanoid and LocalRoot) then
+        Message("甩飞失败", "本地角色部件缺失", 3)
+        return
+    end
+
+    local TargetChar = TargetPlayer.Character
+    local TargetHumanoid = TargetChar and TargetChar:FindFirstChildOfClass("Humanoid")
+    local TargetRoot = TargetHumanoid and TargetHumanoid.RootPart
+    local TargetHead = TargetChar and TargetChar:FindFirstChild("Head")
+    local Accessory = TargetChar and TargetChar:FindFirstChildOfClass("Accessory")
+    local AccessoryHandle = Accessory and Accessory:FindFirstChild("Handle")
+
+    if not (TargetChar and TargetHumanoid) then
+        Message("甩飞失败", TargetPlayer.Name .. "角色无效", 3)
+        return
+    end
+    if TargetHumanoid.Sit then
+        Message("甩飞失败", TargetPlayer.Name .. "正在坐下，无法甩飞", 3)
+        return
+    end
+
+    if not getgenv().OldPos then
+        getgenv().OldPos = LocalRoot.CFrame
+    end
+
+    if TargetHead then
+        workspace.CurrentCamera.CameraSubject = TargetHead
+    elseif AccessoryHandle then
+        workspace.CurrentCamera.CameraSubject = AccessoryHandle
+    else
+        workspace.CurrentCamera.CameraSubject = TargetHumanoid
+    end
+
+    local FPos = function(BasePart, Pos, Ang)
+        if not isFlinging then return end
+        LocalRoot.CFrame = CFrame.new(BasePart.Position) * Pos * Ang
+        LocalChar:SetPrimaryPartCFrame(CFrame.new(BasePart.Position) * Pos * Ang)
+        LocalRoot.Velocity = Vector3.new(9e7, 9e7 * 10, 9e7)
+        LocalRoot.RotVelocity = Vector3.new(9e8, 9e8, 9e8)
+    end
+
+    local SFBasePart = function(BasePart)
+        local startTime = tick()
+        local timeLimit = 2
+        local angle = 0
+
+        repeat
+            if not isFlinging then break end
+            if BasePart.Velocity.Magnitude < 50 then
+                angle = angle + 100
+                FPos(BasePart, CFrame.new(0, 1.5, 0) + TargetHumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(angle), 0, 0))
+                task.wait()
+                FPos(BasePart, CFrame.new(0, -1.5, 0) + TargetHumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(angle), 0, 0))
+                task.wait()
+                FPos(BasePart, CFrame.new(2.25, 1.5, -2.25) + TargetHumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(angle), 0, 0))
+                task.wait()
+                FPos(BasePart, CFrame.new(-2.25, -1.5, 2.25) + TargetHumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(angle), 0, 0))
+                task.wait()
+                FPos(BasePart, CFrame.new(0, 1.5, 0) + TargetHumanoid.MoveDirection, CFrame.Angles(math.rad(angle), 0, 0))
+                task.wait()
+                FPos(BasePart, CFrame.new(0, -1.5, 0) + TargetHumanoid.MoveDirection, CFrame.Angles(math.rad(angle), 0, 0))
+                task.wait()
+            else
+                FPos(BasePart, CFrame.new(0, 1.5, TargetHumanoid.WalkSpeed), CFrame.Angles(math.rad(90), 0, 0))
+                task.wait()
+                FPos(BasePart, CFrame.new(0, -1.5, -TargetHumanoid.WalkSpeed), CFrame.Angles(0, 0, 0))
+                task.wait()
+                FPos(BasePart, CFrame.new(0, 1.5, TargetHumanoid.WalkSpeed), CFrame.Angles(math.rad(90), 0, 0))
+                task.wait()
+                FPos(BasePart, CFrame.new(0, 1.5, TargetRoot.Velocity.Magnitude / 1.25), CFrame.Angles(math.rad(90), 0, 0))
+                task.wait()
+                FPos(BasePart, CFrame.new(0, -1.5, -TargetRoot.Velocity.Magnitude / 1.25), CFrame.Angles(0, 0, 0))
+                task.wait()
+                FPos(BasePart, CFrame.new(0, 1.5, TargetRoot.Velocity.Magnitude / 1.25), CFrame.Angles(math.rad(90), 0, 0))
+                task.wait()
+                FPos(BasePart, CFrame.new(0, -1.5, 0), CFrame.Angles(math.rad(90), 0, 0))
+                task.wait()
+                FPos(BasePart, CFrame.new(0, -1.5, 0), CFrame.Angles(0, 0, 0))
+                task.wait()
+                FPos(BasePart, CFrame.new(0, -1.5, 0), CFrame.Angles(math.rad(-90), 0, 0))
+                task.wait()
+                FPos(BasePart, CFrame.new(0, -1.5, 0), CFrame.Angles(0, 0, 0))
+                task.wait()
+            end
+        until not isFlinging or BasePart.Velocity.Magnitude > 500 or BasePart.Parent ~= TargetChar or TargetPlayer.Parent ~= Players or TargetHumanoid.Sit or LocalHumanoid.Health <= 0 or tick() > startTime + timeLimit
+    end
+
+    workspace.FallenPartsDestroyHeight = 0/0
+    local BV = Instance.new("BodyVelocity")
+    BV.Name = "EpixVel"
+    BV.Parent = LocalRoot
+    BV.Velocity = Vector3.new(9e8, 9e8, 9e8)
+    BV.MaxForce = Vector3.new(1/0, 1/0, 1/0)
+
+    LocalHumanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
+
+    if TargetRoot and TargetHead then
+        SFBasePart((TargetRoot.Position - TargetHead.Position).Magnitude > 5 and TargetHead or TargetRoot)
+    elseif TargetRoot then
+        SFBasePart(TargetRoot)
+    elseif TargetHead then
+        SFBasePart(TargetHead)
+    elseif AccessoryHandle then
+        SFBasePart(AccessoryHandle)
+    else
+        Message("甩飞失败", TargetPlayer.Name .. "缺失关键部件", 3)
+    end
+
+    if BV and BV.Parent then BV:Destroy() end
+    LocalHumanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, true)
+    workspace.CurrentCamera.CameraSubject = LocalHumanoid
+
+    if getgenv().OldPos and isFlinging then
+        local recoverStart = tick()
+        repeat
+            if not isFlinging then break end
+            LocalRoot.CFrame = getgenv().OldPos * CFrame.new(0, 0.5, 0)
+            LocalChar:SetPrimaryPartCFrame(getgenv().OldPos * CFrame.new(0, 0.5, 0))
+            LocalHumanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+            for _, part in ipairs(LocalChar:GetChildren()) do
+                if part:IsA("BasePart") then
+                    part.Velocity, part.RotVelocity = Vector3.new(), Vector3.new()
+                end
+            end
+            task.wait()
+        until (LocalRoot.Position - getgenv().OldPos.Position).Magnitude < 25 or tick() > recoverStart + 3 or not isFlinging
+    end
+    workspace.FallenPartsDestroyHeight = getgenv().FPDH
+end
+
+local startFling = function()
+    if isFlinging then
+        Message("提示", "已在甩飞中，无需重复开启", 2)
+        return
+    end
+
+    if not LocalPlayer.Character then
+        Message("甩飞失败", "请先加载角色", 3)
+        return
+    end
+
+    isFlinging = true
+    Message("甩飞开启", "目标：" .. selectedTarget, 2)
+
+    flingConnection = task.spawn(function()
+        while isFlinging do
+            local targetType = GetPlayer(selectedTarget)
+            if targetType == "全部" then
+                local allTargets = Players:GetPlayers()
+                table.remove(allTargets, table.find(allTargets, LocalPlayer))
+                if #allTargets == 0 then
+                    Message("甩飞失败", "无其他玩家可作为目标", 3)
+                    stopFling()
+                    return
+                end
+                for _, target in ipairs(allTargets) do
+                    if not isFlinging then break end
+                    SkidFling(target)
+                    task.wait(0.5)
+                end
+            else
+                local singleTarget = targetType
+                if not singleTarget or singleTarget == LocalPlayer then
+                    Message("甩飞失败", "目标玩家不存在或为自己", 3)
+                    stopFling()
+                    return
+                end
+                SkidFling(singleTarget)
+            end
+            task.wait(1)
+        end
+    end)
+end
+
+local stopFling = function()
+    if not isFlinging then
+        Message("提示", "未在甩飞中，无需关闭", 2)
+        return
+    end
+
+    isFlinging = false
+    if flingConnection then
+        task.cancel(flingConnection)
+        flingConnection = nil
+    end
+
+    local localHumanoid = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+    if localHumanoid then
+        workspace.CurrentCamera.CameraSubject = localHumanoid
+    end
+
+    local localRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if localRoot then
+        local bv = localRoot:FindFirstChild("EpixVel")
+        if bv then bv:Destroy() end
+        localRoot.Velocity, localRoot.RotVelocity = Vector3.new(), Vector3.new()
+    end
+
+    workspace.FallenPartsDestroyHeight = getgenv().FPDH
+
+    Message("甩飞关闭", "已恢复正常状态", 2)
+end
+
+local getFlingTargetOptions = function()
+    local options = {"全部", "随机"}
+    local playerInfo = {}
+    
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            local displayName = player.DisplayName .. " (" .. player.Name .. ")"
+            table.insert(options, displayName)
+            playerInfo[displayName] = {
+                name = player.Name,
+                userId = player.UserId
+            }
+        end
+    end
+    
+    return options, playerInfo
+end
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "PlayerAttachAndFlingUI"
+screenGui.IgnoreGuiInset = true
+screenGui.ResetOnSpawn = false
+screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0.22, 0, 0.7, 0)
+mainFrame.Position = UDim2.new(0.05, 0, 0.16, 0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+mainFrame.AnchorPoint = Vector2.new(0, 0)
+mainFrame.BorderSizePixel = 0
+mainFrame.Parent = screenGui
+local mainCorner = Instance.new("UICorner")
+mainCorner.CornerRadius = UDim.new(0, 18)
+mainCorner.Parent = mainFrame
+
+local dragging = false
+local dragStart = Vector2.new()
+local startPos = mainFrame.Position
+
+mainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = mainFrame.Position
+    end
+end)
+
+mainFrame.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = false
+    end
+end)
+
+mainFrame.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
+        local delta = input.Position - dragStart
+        mainFrame.Position = UDim2.new(
+            startPos.X.Scale,
+            startPos.X.Offset + delta.X,
+            startPos.Y.Scale,
+            startPos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+local minimizeBtn = Instance.new("TextButton")
+minimizeBtn.Size = UDim2.new(0, 25, 0, 25)
+minimizeBtn.AnchorPoint = Vector2.new(1, 0)
+minimizeBtn.Position = UDim2.new(1, -6, 0, 4)
+minimizeBtn.Text = "-"
+minimizeBtn.TextScaled = true
+minimizeBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+minimizeBtn.TextColor3 = Color3.fromRGB(255,255,255)
+minimizeBtn.BorderSizePixel = 0
+minimizeBtn.Parent = mainFrame
+local minimizeCorner = Instance.new("UICorner")
+minimizeCorner.CornerRadius = UDim.new(0, 12)
+minimizeCorner.Parent = minimizeBtn
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, -12, 0, 30)
+titleLabel.Position = UDim2.new(0, 6, 0, 0)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "吸附甩飞系统"
+titleLabel.TextColor3 = Color3.fromRGB(255,255,255)
+titleLabel.TextScaled = true
+titleLabel.Font = Enum.Font.SourceSansBold
+titleLabel.TextSize = 10
+titleLabel.Parent = mainFrame
+
+local attachPlayerScroll = Instance.new("ScrollingFrame")
+attachPlayerScroll.Size = UDim2.new(1, -12, 0.35, 0)
+attachPlayerScroll.Position = UDim2.new(0, 6, 0, 35)
+attachPlayerScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+attachPlayerScroll.BackgroundTransparency = 1
+attachPlayerScroll.ScrollBarThickness = 6
+attachPlayerScroll.BorderSizePixel = 0
+attachPlayerScroll.Parent = mainFrame
+
+local playerButtons = {}
+local selectedPlayer = nil
+
+local function refreshAttachPlayerList()
     for _, btn in playerButtons do
         btn:Destroy()
     end
     playerButtons = {}
     
-    -- 清除之前的"暂无玩家"提示
-    local existingNoPlayerLabel = playerScroll:FindFirstChild("NoPlayerLabel")
+    local existingNoPlayerLabel = attachPlayerScroll:FindFirstChild("NoPlayerLabel")
     if existingNoPlayerLabel then
         existingNoPlayerLabel:Destroy()
     end
@@ -288,7 +491,7 @@ local function refreshPlayerList()
             btn.Text = ""
             btn.BorderSizePixel = 0
             btn.AutoButtonColor = true
-            btn.Parent = playerScroll
+            btn.Parent = attachPlayerScroll
             local btnCorner = Instance.new("UICorner")
             btnCorner.CornerRadius = UDim.new(0, 10)
             btnCorner.Parent = btn
@@ -311,14 +514,13 @@ local function refreshPlayerList()
             nameLabel.Position = UDim2.new(0, 26, 0, 0)
             nameLabel.BackgroundTransparency = 1
             nameLabel.Text = "  " .. player.DisplayName .. " (" .. player.Name .. ")"
-            nameLabel.TextColor3 = Color3.fromRGB(255, 255, 0) -- 改为黄色
+            nameLabel.TextColor3 = Color3.fromRGB(255, 255, 0)
             nameLabel.TextXAlignment = Enum.TextXAlignment.Left
             nameLabel.TextScaled = false
-            nameLabel.TextSize = 13  -- 自定义字体大小
+            nameLabel.TextSize = 13
             nameLabel.Font = Enum.Font.SourceSansSemibold
             nameLabel.Parent = btn
 
-            -- 存储玩家引用到按钮中，方便最小化时识别
             btn:SetAttribute("PlayerName", player.Name)
 
             btn.MouseButton1Click:Connect(function()
@@ -334,7 +536,6 @@ local function refreshPlayerList()
         end
     end
     
-    -- 如果没有其他玩家，显示"暂无玩家"提示
     if not hasOtherPlayers then
         local noPlayerLabel = Instance.new("TextLabel")
         noPlayerLabel.Name = "NoPlayerLabel"
@@ -342,87 +543,259 @@ local function refreshPlayerList()
         noPlayerLabel.Position = UDim2.new(0, 6, 0, 0)
         noPlayerLabel.BackgroundTransparency = 1
         noPlayerLabel.Text = "暂无其他玩家"
-        noPlayerLabel.TextColor3 = Color3.fromRGB(0, 255, 0) -- 绿色
+        noPlayerLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
         noPlayerLabel.TextXAlignment = Enum.TextXAlignment.Center
         noPlayerLabel.TextScaled = false
         noPlayerLabel.TextSize = 13
         noPlayerLabel.Font = Enum.Font.SourceSansSemibold
-        noPlayerLabel.Parent = playerScroll
+        noPlayerLabel.Parent = attachPlayerScroll
         y = 30
     end
     
-    playerScroll.CanvasSize = UDim2.new(0, 0, 0, y)
+    attachPlayerScroll.CanvasSize = UDim2.new(0, 0, 0, y)
 end
 
-refreshPlayerList()
-Players.PlayerAdded:Connect(refreshPlayerList)
-Players.PlayerRemoving:Connect(refreshPlayerList)
+refreshAttachPlayerList()
+Players.PlayerAdded:Connect(refreshAttachPlayerList)
+Players.PlayerRemoving:Connect(refreshAttachPlayerList)
 
-local titleLabel = Instance.new("TextLabel")
-titleLabel.Size = UDim2.new(1, -12, 0, 30)
-titleLabel.Position = UDim2.new(0, 6, 0, 0)
-titleLabel.BackgroundTransparency = 1
-titleLabel.Text = "吸附系统"
-titleLabel.TextColor3 = Color3.fromRGB(255,255,255)
-titleLabel.TextScaled = true
-titleLabel.Font = Enum.Font.SourceSansBold
-titleLabel.TextSize = 10
-titleLabel.Parent = mainFrame
+local divider = Instance.new("Frame")
+divider.Size = UDim2.new(1, -12, 0, 1)
+divider.Position = UDim2.new(0, 6, 0, 0.42)
+divider.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+divider.BorderSizePixel = 0
+divider.Parent = mainFrame
 
--- 自定义底部按钮尺寸变量
-local bottomButtonHeight = 30  -- 底部按钮高度（像素）
-local bottomFrameHeight = bottomButtonHeight + 0  -- 底部框架高度（按钮高度+边距）
+local flingTitle = Instance.new("TextLabel")
+flingTitle.Size = UDim2.new(1, -12, 0, 20)
+flingTitle.Position = UDim2.new(0, 6, 0, 0.44)
+flingTitle.BackgroundTransparency = 1
+flingTitle.Text = "甩飞控制"
+flingTitle.TextColor3 = Color3.fromRGB(255, 165, 0)
+flingTitle.TextXAlignment = Enum.TextXAlignment.Left
+flingTitle.TextScaled = false
+flingTitle.TextSize = 12
+flingTitle.Font = Enum.Font.SourceSansBold
+flingTitle.Parent = mainFrame
+
+local flingTargetFrame = Instance.new("Frame")
+flingTargetFrame.Size = UDim2.new(0.9, -12, 0, 30)
+flingTargetFrame.Position = UDim2.new(0, 6, 0, 0.49)
+flingTargetFrame.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+flingTargetFrame.BorderSizePixel = 0
+flingTargetFrame.Parent = mainFrame
+local flingTargetCorner = Instance.new("UICorner")
+flingTargetCorner.CornerRadius = UDim.new(0, 10)
+flingTargetCorner.Parent = flingTargetFrame
+
+local flingTargetLabel = Instance.new("TextLabel")
+flingTargetLabel.Size = UDim2.new(0.7, -30, 1, 0)
+flingTargetLabel.Position = UDim2.new(0, 5, 0, 0)
+flingTargetLabel.BackgroundTransparency = 1
+flingTargetLabel.Text = selectedTarget
+flingTargetLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+flingTargetLabel.TextXAlignment = Enum.TextXAlignment.Left
+flingTargetLabel.TextScaled = false
+flingTargetLabel.TextSize = 11
+flingTargetLabel.Font = Enum.Font.SourceSans
+flingTargetLabel.Parent = flingTargetFrame
+
+local flingArrowBtn = Instance.new("TextButton")
+flingArrowBtn.Size = UDim2.new(0, 30, 1, 0)
+flingArrowBtn.AnchorPoint = Vector2.new(1, 0)
+flingArrowBtn.Position = UDim2.new(1, 0, 0, 0)
+flingArrowBtn.Text = "▼"
+flingArrowBtn.TextScaled = true
+flingArrowBtn.BackgroundTransparency = 1
+flingArrowBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+flingArrowBtn.BorderSizePixel = 0
+flingArrowBtn.Parent = flingTargetFrame
+
+local flingOptionsList = Instance.new("ScrollingFrame")
+flingOptionsList.Size = UDim2.new(0.9, -12, 0, 30)
+flingOptionsList.Position = UDim2.new(0, 6, 0, 0.49 + 30/70)
+flingOptionsList.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+flingOptionsList.BackgroundTransparency = 0
+flingOptionsList.ScrollBarThickness = 4
+flingOptionsList.BorderSizePixel = 0
+flingOptionsList.Visible = false
+flingOptionsList.Parent = mainFrame
+local flingOptionsCorner = Instance.new("UICorner")
+flingOptionsCorner.CornerRadius = UDim.new(0, 10)
+flingOptionsCorner.Parent = flingOptionsList
+
+local isFlingOptionsOpen = false
+flingArrowBtn.MouseButton1Click:Connect(function()
+    isFlingOptionsOpen = not isFlingOptionsOpen
+    flingOptionsList.Visible = isFlingOptionsOpen
+    flingArrowBtn.Text = isFlingOptionsOpen and "▲" or "▼"
+    
+    if isFlingOptionsOpen then
+        for _, child in ipairs(flingOptionsList:GetChildren()) do
+            if child:IsA("TextButton") then
+                child:Destroy()
+            end
+        end
+        
+        local options, playerInfo = getFlingTargetOptions()
+        local y = 0
+        local maxHeight = 150
+        
+        for _, opt in ipairs(options) do
+            local optBtn = Instance.new("TextButton")
+            optBtn.Size = UDim2.new(1, 0, 0, 30)
+            optBtn.Position = UDim2.new(0, 0, 0, y)
+            
+            local isSelected = opt == selectedTarget
+            if not isSelected and playerInfo[selectedTarget] and playerInfo[opt] and playerInfo[opt].name == playerInfo[selectedTarget].name then
+                isSelected = true
+            end
+            
+            optBtn.BackgroundColor3 = isSelected and Color3.fromRGB(80, 120, 200) or Color3.fromRGB(70, 70, 70)
+            optBtn.Text = ""
+            optBtn.TextScaled = false
+            optBtn.TextSize = 14
+            optBtn.Font = Enum.Font.SourceSans
+            optBtn.BorderSizePixel = 0
+            optBtn.Parent = flingOptionsList
+            
+            local corner = Instance.new("UICorner")
+            corner.CornerRadius = UDim.new(0, 8)
+            corner.Parent = optBtn
+            
+            if opt ~= "全部" and opt ~= "随机" and playerInfo[opt] then
+                local thumb = Instance.new("ImageLabel")
+                thumb.Size = UDim2.new(0, 24, 0, 24)
+                thumb.Position = UDim2.new(0, 3, 0, 3)
+                thumb.BackgroundTransparency = 1
+                thumb.Parent = optBtn
+                local thumbCorner = Instance.new("UICorner")
+                thumbCorner.CornerRadius = UDim.new(1, 0)
+                thumbCorner.Parent = thumb
+                local thumbType = Enum.ThumbnailType.HeadShot
+                local thumbSize = Enum.ThumbnailSize.Size48x48
+                local thumbUrl = Players:GetUserThumbnailAsync(playerInfo[opt].userId, thumbType, thumbSize)
+                thumb.Image = thumbUrl
+                
+                local nameLabel = Instance.new("TextLabel")
+                nameLabel.Size = UDim2.new(1, -35, 1, 0)
+                nameLabel.Position = UDim2.new(0, 32, 0, 0)
+                nameLabel.BackgroundTransparency = 1
+                nameLabel.Text = opt .. "甩飞"
+                nameLabel.TextColor3 = Color3.fromRGB(0, 255, 156)
+                nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+                nameLabel.TextScaled = false
+                nameLabel.TextSize = 14
+                nameLabel.Font = Enum.Font.SourceSans
+                nameLabel.Parent = optBtn
+            else
+                local nameLabel = Instance.new("TextLabel")
+                nameLabel.Size = UDim2.new(1, -6, 1, 0)
+                nameLabel.Position = UDim2.new(0, 3, 0, 0)
+                nameLabel.BackgroundTransparency = 1
+                nameLabel.Text = opt .. "甩飞"
+                nameLabel.TextColor3 = Color3.fromRGB(255, 255, 156)
+                nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+                nameLabel.TextScaled = false
+                nameLabel.TextSize = 16
+                nameLabel.Font = Enum.Font.SourceSansBold
+                nameLabel.Parent = optBtn
+            end
+            
+            optBtn.MouseButton1Click:Connect(function()
+                selectedTarget = opt
+                flingTargetLabel.Text = opt
+                isFlingOptionsOpen = false
+                flingOptionsList.Visible = false
+                flingArrowBtn.Text = "▼"
+                Message("甩飞目标切换", "当前目标：" .. opt, 2)
+            end)
+            
+            y = y + 30
+        end
+        
+        local dynamicHeight = math.min(y, maxHeight)
+        flingOptionsList.Size = UDim2.new(flingOptionsList.Size.X.Scale, flingOptionsList.Size.X.Offset, 0, dynamicHeight)
+        flingOptionsList.CanvasSize = UDim2.new(0, 0, 0, y)
+    end
+end)
 
 local bottomFrame = Instance.new("Frame")
-bottomFrame.Size = UDim2.new(1, -12, 0, bottomFrameHeight)
-bottomFrame.Position = UDim2.new(0, 6, 1, -bottomFrameHeight - 6)
+bottomFrame.Size = UDim2.new(1, -12, 0, 66)
+bottomFrame.Position = UDim2.new(0, 6, 1, -72)
 bottomFrame.BackgroundTransparency = 1
 bottomFrame.Parent = mainFrame
 
+local middleRowFrame = Instance.new("Frame")
+middleRowFrame.Size = UDim2.new(1, 0, 0, 30)
+middleRowFrame.Position = UDim2.new(0, 0, 0, 0)
+middleRowFrame.BackgroundTransparency = 1
+middleRowFrame.Parent = bottomFrame
+
 local attachBtn = Instance.new("TextButton")
-attachBtn.Size = UDim2.new(0.35, -2, 0, bottomButtonHeight)
-attachBtn.Position = UDim2.new(0, 0, 0, 5)
+attachBtn.Size = UDim2.new(0.48, -2, 1, 0)
+attachBtn.Position = UDim2.new(0, 0, 0, 0)
 attachBtn.Text = "吸附"
 attachBtn.TextScaled = true
 attachBtn.BackgroundColor3 = Color3.fromRGB(60, 180, 80)
 attachBtn.TextColor3 = Color3.fromRGB(255,255,255)
 attachBtn.BorderSizePixel = 0
 attachBtn.Font = Enum.Font.SourceSansBold
-attachBtn.Parent = bottomFrame
+attachBtn.Parent = middleRowFrame
 local attachCorner = Instance.new("UICorner")
 attachCorner.CornerRadius = UDim.new(0, 10)
 attachCorner.Parent = attachBtn
 
--- 透明度按钮
-local transparencyBtn = Instance.new("TextButton")
-transparencyBtn.Size = UDim2.new(0.2, -2, 0, bottomButtonHeight)
-transparencyBtn.Position = UDim2.new(0.4, 2, 0, 5)
-transparencyBtn.Text = "透"
-transparencyBtn.TextScaled = true
-transparencyBtn.BackgroundColor3 = Color3.fromRGB(120, 120, 120)
-transparencyBtn.TextColor3 = Color3.fromRGB(255,255,255)
-transparencyBtn.BorderSizePixel = 0
-transparencyBtn.Font = Enum.Font.SourceSansBold
-transparencyBtn.Parent = bottomFrame
-local transparencyCorner = Instance.new("UICorner")
-transparencyCorner.CornerRadius = UDim.new(0, 10)
-transparencyCorner.Parent = transparencyBtn
-
 local detachBtn = Instance.new("TextButton")
-detachBtn.Size = UDim2.new(0.35, -2, 0, bottomButtonHeight)
-detachBtn.Position = UDim2.new(0.65, 2, 0, 5)
+detachBtn.Size = UDim2.new(0.48, -2, 1, 0)
+detachBtn.Position = UDim2.new(0.52, 2, 0, 0)
 detachBtn.Text = "取消吸附"
 detachBtn.TextScaled = true
 detachBtn.BackgroundColor3 = Color3.fromRGB(180, 60, 60)
 detachBtn.TextColor3 = Color3.fromRGB(255,255,255)
 detachBtn.BorderSizePixel = 0
 detachBtn.Font = Enum.Font.SourceSansBold
-detachBtn.Parent = bottomFrame
+detachBtn.Parent = middleRowFrame
 local detachCorner = Instance.new("UICorner")
 detachCorner.CornerRadius = UDim.new(0, 10)
 detachCorner.Parent = detachBtn
 
--- 按钮逻辑（不变）
+local flingBtnFrame = Instance.new("Frame")
+flingBtnFrame.Size = UDim2.new(1, 0, 0, 30)
+flingBtnFrame.Position = UDim2.new(0, 0, 0, 36)
+flingBtnFrame.BackgroundTransparency = 1
+flingBtnFrame.Parent = bottomFrame
+
+local startFlingBtn = Instance.new("TextButton")
+startFlingBtn.Size = UDim2.new(0.48, -2, 1, 0)
+startFlingBtn.Position = UDim2.new(0, 0, 0, 0)
+startFlingBtn.Text = "开启甩飞"
+startFlingBtn.TextScaled = false
+startFlingBtn.TextSize = 22
+startFlingBtn.BackgroundColor3 = Color3.fromRGB(255, 150, 0)
+startFlingBtn.TextColor3 = Color3.fromRGB(255,255,255)
+startFlingBtn.BorderSizePixel = 0
+startFlingBtn.Font = Enum.Font.SourceSansSemibold
+startFlingBtn.Parent = flingBtnFrame
+local startFlingCorner = Instance.new("UICorner")
+startFlingCorner.CornerRadius = UDim.new(0, 10)
+startFlingCorner.Parent = startFlingBtn
+
+local stopFlingBtn = Instance.new("TextButton")
+stopFlingBtn.Size = UDim2.new(0.48, -2, 1, 0)
+stopFlingBtn.Position = UDim2.new(0.52, 2, 0, 0)
+stopFlingBtn.Text = "关闭甩飞"
+stopFlingBtn.TextScaled = false
+stopFlingBtn.TextSize = 22
+stopFlingBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 200)
+stopFlingBtn.TextColor3 = Color3.fromRGB(255,255,255)
+stopFlingBtn.BorderSizePixel = 0
+stopFlingBtn.Font = Enum.Font.SourceSansSemibold
+stopFlingBtn.Parent = flingBtnFrame
+local stopFlingCorner = Instance.new("UICorner")
+stopFlingCorner.CornerRadius = UDim.new(0, 10)
+stopFlingCorner.Parent = stopFlingBtn
+
 attachBtn.MouseButton1Click:Connect(function()
     if selectedPlayer then
         local success = toggleAttach(true, selectedPlayer)
@@ -439,63 +812,91 @@ detachBtn.MouseButton1Click:Connect(function()
     attachBtn.Text = "吸附"
 end)
 
--- 透明度按钮点击事件
-transparencyBtn.MouseButton1Click:Connect(function()
-    toggleTransparency()
-end)
+startFlingBtn.MouseButton1Click:Connect(startFling)
+stopFlingBtn.MouseButton1Click:Connect(stopFling)
 
--- 最小化功能（修改：保持显示标题和玩家列表，只调整大小）
+local isMinimized = false
+local originalSize = mainFrame.Size
+local originalPosition = mainFrame.Position
+
 local function toggleMinimize()
     if isMinimized then
-        -- 恢复到正常大小（最大化状态）
         isMinimized = false
         mainFrame.Size = originalSize
         minimizeBtn.Text = "-"
         
-        -- 恢复playerScroll的大小和位置
-        playerScroll.Size = UDim2.new(1, -12, 0.75, 0)
-        playerScroll.Position = UDim2.new(0, 6, 0, 35)
+        attachPlayerScroll.Visible = true
+        divider.Visible = true
+        flingTitle.Visible = true
+        flingTargetFrame.Visible = true
+        flingBtnFrame.Visible = true
+        bottomFrame.Visible = true
         
-        -- 恢复底部按钮框位置
-        bottomFrame.Position = UDim2.new(0, 6, 1, -bottomFrameHeight - 6)
-        
-        -- 刷新玩家列表以恢复正常布局
-        refreshPlayerList()
+        refreshAttachPlayerList()
     else
-        -- 最小化状态
         isMinimized = true
         originalSize = mainFrame.Size
-        mainFrame.Size = UDim2.new(0.22, 0, 0.3, 0)  -- 调整高度以容纳标题、两个玩家和底部按钮
+        mainFrame.Size = UDim2.new(0.22, 0, 0.22, 0)
         minimizeBtn.Text = "+"
         
-        -- 调整playerScroll的大小和位置以适应最小化状态
-        playerScroll.Size = UDim2.new(1, -12, 0, 66)  -- 固定高度容纳两个玩家按钮
-        playerScroll.Position = UDim2.new(0, 6, 0, 35)
+        divider.Visible = false
+        flingTitle.Visible = false
+        flingTargetFrame.Visible = false
+        flingOptionsList.Visible = false
+        flingBtnFrame.Visible = false
+        bottomFrame.Visible = false
         
-        -- 调整底部按钮框位置适应新高度
-        bottomFrame.Position = UDim2.new(0, 6, 1, -bottomFrameHeight - 6)
-        
-        -- 只显示前两个玩家按钮
+        attachPlayerScroll.Size = UDim2.new(1, -12, 0, 66)
         local visibleCount = 0
         for _, btn in pairs(playerButtons) do
             btn.Visible = false
         end
-        
         for _, btn in pairs(playerButtons) do
             if visibleCount < 2 then
                 btn.Visible = true
                 btn.Position = UDim2.new(0.025, 0, 0, visibleCount * 33)
-                btn.Size = UDim2.new(0.95, 0, 0, 30)
                 visibleCount = visibleCount + 1
             end
         end
     end
 end
+minimizeBtn.MouseButton1Click:Connect(toggleMinimize)
 
--- 最小化按钮点击事件
-minimizeBtn.MouseButton1Click:Connect(function()
-    toggleMinimize()
+task.spawn(function()
+    while true do
+        if not isFlingOptionsOpen then
+            local currentOptions = getFlingTargetOptions()
+            local targetStillExists = false
+            if selectedTarget ~= "全部" and selectedTarget ~= "随机" then
+                local usernameToCheck = selectedTarget:match("%((.-)%)") or selectedTarget
+                for _, player in ipairs(Players:GetPlayers()) do
+                    if player ~= LocalPlayer and player.Name == usernameToCheck then
+                        targetStillExists = true
+                        break
+                    end
+                end
+            else
+                targetStillExists = true
+            end
+            
+            if not targetStillExists then
+                selectedTarget = "全部"
+                flingTargetLabel.Text = "全部"
+            end
+        end
+        task.wait(5)
+    end
 end)
 
--- 默认显示UI（不变）
+Message("系统加载完成", "吸附+甩飞功能已就绪", 3)
 screenGui.Enabled = true
+
+game.Close:Connect(function()
+    for _, conn in ipairs(cleanupList.connections) do
+        if conn.Connected then
+            conn:Disconnect()
+        end
+    end
+    stopAttaching()
+    stopFling()
+end)
