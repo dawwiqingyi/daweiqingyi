@@ -383,6 +383,12 @@ local getFlingTargetOptions = function()
     return options, playerInfo
 end
 
+-- 检查并清理现有UI，确保不重复显示
+local existingGui = LocalPlayer.PlayerGui:FindFirstChild("PlayerAttachAndFlingUI")
+if existingGui then
+    existingGui:Destroy()
+end
+
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "PlayerAttachAndFlingUI"
 screenGui.IgnoreGuiInset = true
@@ -390,9 +396,10 @@ screenGui.ResetOnSpawn = false
 screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0.22, 0, 0.7, 0)
-mainFrame.Position = UDim2.new(0.05, 0, 0.16, 0)
+mainFrame.Size = UDim2.new(0.25, 0, 0.7, 0) -- 减小宽度
+mainFrame.Position = UDim2.new(0.05, 0, 0.16, 0) -- 保持原始位置
 mainFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+mainFrame.BackgroundTransparency = 0.2 -- 标题栏透明度20%
 mainFrame.AnchorPoint = Vector2.new(0, 0)
 mainFrame.BorderSizePixel = 0
 mainFrame.Parent = screenGui
@@ -430,22 +437,68 @@ mainFrame.InputChanged:Connect(function(input)
     end
 end)
 
-local minimizeBtn = Instance.new("TextButton")
-minimizeBtn.Size = UDim2.new(0, 25, 0, 25)
-minimizeBtn.AnchorPoint = Vector2.new(1, 0)
-minimizeBtn.Position = UDim2.new(1, -6, 0, 4)
-minimizeBtn.Text = "-"
-minimizeBtn.TextScaled = true
-minimizeBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
-minimizeBtn.TextColor3 = Color3.fromRGB(255,255,255)
-minimizeBtn.BorderSizePixel = 0
-minimizeBtn.Parent = mainFrame
-local minimizeCorner = Instance.new("UICorner")
-minimizeCorner.CornerRadius = UDim.new(0, 12)
-minimizeCorner.Parent = minimizeBtn
+-- 最小化/最大化切换按钮
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Size = UDim2.new(0, 25, 0, 25)
+toggleBtn.AnchorPoint = Vector2.new(1, 0)
+toggleBtn.Position = UDim2.new(1, -40, 0, 4) -- 进一步靠右
+local isMinimized = false
+local function updateToggleButton()
+    if isMinimized then
+        toggleBtn.Text = "+" -- 最小化状态显示+按钮
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(60, 100, 200)
+    else
+        toggleBtn.Text = "-" -- 正常状态显示-按钮
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+    end
+end
+updateToggleButton()
+toggleBtn.TextScaled = true
+toggleBtn.BackgroundTransparency = 0.7 -- 设置半透明
+toggleBtn.TextColor3 = Color3.fromRGB(255,255,255)
+toggleBtn.BorderSizePixel = 0
+toggleBtn.Font = Enum.Font.SourceSansBold
+toggleBtn.Parent = mainFrame
+local toggleCorner = Instance.new("UICorner")
+toggleCorner.CornerRadius = UDim.new(0, 12)
+toggleCorner.Parent = toggleBtn
 
+-- 关闭按钮（X按钮）
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 25, 0, 25)
+closeBtn.AnchorPoint = Vector2.new(1, 0)
+closeBtn.Position = UDim2.new(1, -10, 0, 4) -- 进一步靠右
+closeBtn.Text = "X"
+closeBtn.TextScaled = true
+closeBtn.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
+closeBtn.BackgroundTransparency = 0.7 -- 设置半透明
+closeBtn.TextColor3 = Color3.fromRGB(255,255,255)
+closeBtn.BorderSizePixel = 0
+closeBtn.Font = Enum.Font.SourceSansBold
+closeBtn.Parent = mainFrame
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(0, 12)
+closeCorner.Parent = closeBtn
+
+-- 关闭按钮点击事件
+closeBtn.MouseButton1Click:Connect(function()
+    -- 清理所有连接和状态
+    for _, conn in ipairs(cleanupList.connections) do
+        if conn.Connected then
+            conn:Disconnect()
+        end
+    end
+    stopAttaching()
+    stopFling()
+    -- 销毁UI
+    screenGui:Destroy()
+end)
+
+
+-- 标题标签
 local titleLabel = Instance.new("TextLabel")
-titleLabel.Size = UDim2.new(1, -12, 0, 30)
+titleLabel.Size = UDim2.new(1, -65, 0, 30) -- 调整宽度以适应进一步靠右的按钮
+
 titleLabel.Position = UDim2.new(0, 6, 0, 0)
 titleLabel.BackgroundTransparency = 1
 titleLabel.Text = "吸附甩飞系统"
@@ -453,6 +506,7 @@ titleLabel.TextColor3 = Color3.fromRGB(255,255,255)
 titleLabel.TextScaled = true
 titleLabel.Font = Enum.Font.SourceSansBold
 titleLabel.TextSize = 10
+titleLabel.TextXAlignment = Enum.TextXAlignment.Left -- 左对齐文本
 titleLabel.Parent = mainFrame
 
 local attachPlayerScroll = Instance.new("ScrollingFrame")
@@ -579,9 +633,10 @@ flingTitle.Font = Enum.Font.SourceSansBold
 flingTitle.Parent = mainFrame
 
 local flingTargetFrame = Instance.new("Frame")
-flingTargetFrame.Size = UDim2.new(0.9, -12, 0, 30)
+flingTargetFrame.Size = UDim2.new(0.765, -12, 0, 25.5) -- 减小15%
 flingTargetFrame.Position = UDim2.new(0, 6, 0, 0.49)
 flingTargetFrame.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+flingTargetFrame.BackgroundTransparency = 0.5 -- 设置半透明
 flingTargetFrame.BorderSizePixel = 0
 flingTargetFrame.Parent = mainFrame
 local flingTargetCorner = Instance.new("UICorner")
@@ -596,12 +651,12 @@ flingTargetLabel.Text = selectedTarget
 flingTargetLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 flingTargetLabel.TextXAlignment = Enum.TextXAlignment.Left
 flingTargetLabel.TextScaled = false
-flingTargetLabel.TextSize = 11
+flingTargetLabel.TextSize = 10 -- 略微减小字体
 flingTargetLabel.Font = Enum.Font.SourceSans
 flingTargetLabel.Parent = flingTargetFrame
 
 local flingArrowBtn = Instance.new("TextButton")
-flingArrowBtn.Size = UDim2.new(0, 30, 1, 0)
+flingArrowBtn.Size = UDim2.new(0, 25.5, 1, 0) -- 减小15%
 flingArrowBtn.AnchorPoint = Vector2.new(1, 0)
 flingArrowBtn.Position = UDim2.new(1, 0, 0, 0)
 flingArrowBtn.Text = "▼"
@@ -612,10 +667,10 @@ flingArrowBtn.BorderSizePixel = 0
 flingArrowBtn.Parent = flingTargetFrame
 
 local flingOptionsList = Instance.new("ScrollingFrame")
-flingOptionsList.Size = UDim2.new(0.9, -12, 0, 30)
-flingOptionsList.Position = UDim2.new(0, 6, 0, 0.49 + 30/70)
+flingOptionsList.Size = UDim2.new(0.765, -12, 0, 25.5) -- 减小15%
+flingOptionsList.Position = UDim2.new(0, 6, 0, 0.49 + 25.5/70)
 flingOptionsList.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
-flingOptionsList.BackgroundTransparency = 0
+flingOptionsList.BackgroundTransparency = 0.5 -- 设置半透明
 flingOptionsList.ScrollBarThickness = 4
 flingOptionsList.BorderSizePixel = 0
 flingOptionsList.Visible = false
@@ -643,7 +698,7 @@ flingArrowBtn.MouseButton1Click:Connect(function()
         
         for _, opt in ipairs(options) do
             local optBtn = Instance.new("TextButton")
-            optBtn.Size = UDim2.new(1, 0, 0, 30)
+            optBtn.Size = UDim2.new(1, 0, 0, 25.5) -- 减小15%
             optBtn.Position = UDim2.new(0, 0, 0, y)
             
             local isSelected = opt == selectedTarget
@@ -652,9 +707,10 @@ flingArrowBtn.MouseButton1Click:Connect(function()
             end
             
             optBtn.BackgroundColor3 = isSelected and Color3.fromRGB(80, 120, 200) or Color3.fromRGB(70, 70, 70)
+            optBtn.BackgroundTransparency = 0.5 -- 设置半透明
             optBtn.Text = ""
             optBtn.TextScaled = false
-            optBtn.TextSize = 14
+            optBtn.TextSize = 12 -- 略微减小字体
             optBtn.Font = Enum.Font.SourceSans
             optBtn.BorderSizePixel = 0
             optBtn.Parent = flingOptionsList
@@ -665,8 +721,8 @@ flingArrowBtn.MouseButton1Click:Connect(function()
             
             if opt ~= "全部" and opt ~= "随机" and playerInfo[opt] then
                 local thumb = Instance.new("ImageLabel")
-                thumb.Size = UDim2.new(0, 24, 0, 24)
-                thumb.Position = UDim2.new(0, 3, 0, 3)
+                thumb.Size = UDim2.new(0, 20.4, 0, 20.4) -- 减小15%
+                thumb.Position = UDim2.new(0, 3, 0, 2.55)
                 thumb.BackgroundTransparency = 1
                 thumb.Parent = optBtn
                 local thumbCorner = Instance.new("UICorner")
@@ -678,14 +734,14 @@ flingArrowBtn.MouseButton1Click:Connect(function()
                 thumb.Image = thumbUrl
                 
                 local nameLabel = Instance.new("TextLabel")
-                nameLabel.Size = UDim2.new(1, -35, 1, 0)
-                nameLabel.Position = UDim2.new(0, 32, 0, 0)
+                nameLabel.Size = UDim2.new(1, -30, 1, 0)
+                nameLabel.Position = UDim2.new(0, 28, 0, 0)
                 nameLabel.BackgroundTransparency = 1
                 nameLabel.Text = opt .. "甩飞"
                 nameLabel.TextColor3 = Color3.fromRGB(0, 255, 156)
                 nameLabel.TextXAlignment = Enum.TextXAlignment.Left
                 nameLabel.TextScaled = false
-                nameLabel.TextSize = 14
+                nameLabel.TextSize = 12 -- 略微减小字体
                 nameLabel.Font = Enum.Font.SourceSans
                 nameLabel.Parent = optBtn
             else
@@ -697,7 +753,7 @@ flingArrowBtn.MouseButton1Click:Connect(function()
                 nameLabel.TextColor3 = Color3.fromRGB(255, 255, 156)
                 nameLabel.TextXAlignment = Enum.TextXAlignment.Left
                 nameLabel.TextScaled = false
-                nameLabel.TextSize = 16
+                nameLabel.TextSize = 14 -- 略微减小字体
                 nameLabel.Font = Enum.Font.SourceSansBold
                 nameLabel.Parent = optBtn
             end
@@ -708,7 +764,6 @@ flingArrowBtn.MouseButton1Click:Connect(function()
                 isFlingOptionsOpen = false
                 flingOptionsList.Visible = false
                 flingArrowBtn.Text = "▼"
-                Message("甩飞目标切换", "当前目标：" .. opt, 2)
             end)
             
             y = y + 30
@@ -815,7 +870,15 @@ end)
 startFlingBtn.MouseButton1Click:Connect(startFling)
 stopFlingBtn.MouseButton1Click:Connect(stopFling)
 
-local isMinimized = false
+-- 关闭按钮逻辑
+closeBtn.MouseButton1Click:Connect(function()
+    -- 停止所有功能
+    stopAttaching()
+    stopFling()
+    -- 销毁UI
+    screenGui:Destroy()
+end)
+
 local originalSize = mainFrame.Size
 local originalPosition = mainFrame.Position
 
@@ -823,21 +886,38 @@ local function toggleMinimize()
     if isMinimized then
         isMinimized = false
         mainFrame.Size = originalSize
-        minimizeBtn.Text = "-"
         
+        -- 更新按钮状态和位置
+        updateToggleButton()
+        toggleBtn.Position = UDim2.new(1, -40, 0, 4)
+        closeBtn.Position = UDim2.new(1, -10, 0, 4)
+        
+        -- 恢复原始大小和可见性
+        attachPlayerScroll.Size = UDim2.new(1, -12, 0.35, 0)
         attachPlayerScroll.Visible = true
         divider.Visible = true
         flingTitle.Visible = true
         flingTargetFrame.Visible = true
+        flingOptionsList.Visible = true
         flingBtnFrame.Visible = true
         bottomFrame.Visible = true
+        
+        -- 恢复所有玩家按钮的可见性和位置
+        for i, btn in pairs(playerButtons) do
+            btn.Visible = true
+            btn.Position = UDim2.new(0.025, 0, 0, (i-1) * 30)
+        end
         
         refreshAttachPlayerList()
     else
         isMinimized = true
         originalSize = mainFrame.Size
-        mainFrame.Size = UDim2.new(0.22, 0, 0.22, 0)
-        minimizeBtn.Text = "+"
+        mainFrame.Size = UDim2.new(0.25, 0, 0.15, 0) -- 调整最小化高度和宽度，确保按钮可见
+        
+        -- 更新按钮状态和位置
+        updateToggleButton()
+        toggleBtn.Position = UDim2.new(1, -40, 0, 4)
+        closeBtn.Position = UDim2.new(1, -10, 0, 4)
         
         divider.Visible = false
         flingTitle.Visible = false
@@ -846,21 +926,22 @@ local function toggleMinimize()
         flingBtnFrame.Visible = false
         bottomFrame.Visible = false
         
-        attachPlayerScroll.Size = UDim2.new(1, -12, 0, 66)
+        -- 调整玩家列表在最小化状态下的显示
+        attachPlayerScroll.Size = UDim2.new(1, -12, 0, 80) -- 增加高度以显示更多按钮
         local visibleCount = 0
         for _, btn in pairs(playerButtons) do
             btn.Visible = false
         end
         for _, btn in pairs(playerButtons) do
-            if visibleCount < 2 then
+            if visibleCount < 3 then -- 增加可见按钮数量
                 btn.Visible = true
-                btn.Position = UDim2.new(0.025, 0, 0, visibleCount * 33)
+                btn.Position = UDim2.new(0.025, 0, 0, visibleCount * 25) -- 调整按钮间距
                 visibleCount = visibleCount + 1
             end
         end
     end
 end
-minimizeBtn.MouseButton1Click:Connect(toggleMinimize)
+toggleBtn.MouseButton1Click:Connect(toggleMinimize)
 
 task.spawn(function()
     while true do
@@ -888,7 +969,6 @@ task.spawn(function()
     end
 end)
 
-Message("系统加载完成", "吸附+甩飞功能已就绪", 3)
 screenGui.Enabled = true
 
 game.Close:Connect(function()
