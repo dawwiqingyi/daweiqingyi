@@ -14,6 +14,7 @@ local backOffset = 0.5
 local isFlinging = false
 local flingConnection = nil
 local selectedTarget = "全部"
+local selectedTargets = {"全部"} -- 新增：存储多个选中的目标
 getgenv().FPDH = workspace.FallenPartsDestroyHeight
 
 local cleanupList = {connections = {}}
@@ -304,32 +305,61 @@ local startFling = function()
     end
 
     isFlinging = true
-    Message("甩飞开启", "目标：" .. selectedTarget, 2)
+    Message("甩飞开启", "目标数量：" .. #selectedTargets, 2)
 
     flingConnection = task.spawn(function()
         while isFlinging do
-            local targetType = GetPlayer(selectedTarget)
-            if targetType == "全部" then
-                local allTargets = Players:GetPlayers()
-                table.remove(allTargets, table.find(allTargets, LocalPlayer))
-                if #allTargets == 0 then
-                    Message("甩飞失败", "无其他玩家可作为目标", 3)
-                    stopFling()
-                    return
+            if #selectedTargets == 0 then
+                Message("甩飞失败", "请先选择目标", 3)
+                stopFling()
+                return
+            end
+            
+            -- 处理多个选中的目标
+            for _, targetName in ipairs(selectedTargets) do
+                if not isFlinging then break end
+                
+                if targetName == "全部" then
+                    -- 处理"全部"选项
+                    local allTargets = Players:GetPlayers()
+                    table.remove(allTargets, table.find(allTargets, LocalPlayer))
+                    if #allTargets == 0 then
+                        Message("甩飞失败", "无其他玩家可作为目标", 3)
+                        stopFling()
+                        return
+                    end
+                    for _, target in ipairs(allTargets) do
+                        if not isFlinging then break end
+                        SkidFling(target)
+                        task.wait(0.5)
+                    end
+                elseif targetName == "随机" then
+                    -- 处理"随机"选项
+                    local allTargets = Players:GetPlayers()
+                    table.remove(allTargets, table.find(allTargets, LocalPlayer))
+                    if #allTargets > 0 then
+                        local randomTarget = allTargets[math.random(1, #allTargets)]
+                        SkidFling(randomTarget)
+                        task.wait(0.5)
+                    end
+                else
+                    -- 处理单个玩家
+                    local playerTarget = nil
+                    for _, player in ipairs(Players:GetPlayers()) do
+                        if player ~= LocalPlayer then
+                            local displayName = player.DisplayName .. " (" .. player.Name .. ")"
+                            if displayName == targetName then
+                                playerTarget = player
+                                break
+                            end
+                        end
+                    end
+                    
+                    if playerTarget then
+                        SkidFling(playerTarget)
+                        task.wait(0.5)
+                    end
                 end
-                for _, target in ipairs(allTargets) do
-                    if not isFlinging then break end
-                    SkidFling(target)
-                    task.wait(0.5)
-                end
-            else
-                local singleTarget = targetType
-                if not singleTarget or singleTarget == LocalPlayer then
-                    Message("甩飞失败", "目标玩家不存在或为自己", 3)
-                    stopFling()
-                    return
-                end
-                SkidFling(singleTarget)
             end
             task.wait(1)
         end
@@ -396,7 +426,7 @@ screenGui.ResetOnSpawn = false
 screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0.25, 0, 0.7, 0) -- 减小宽度
+mainFrame.Size = UDim2.new(0.25, 0, 0.55, 0) -- 减小高度
 mainFrame.Position = UDim2.new(0.05, 0, 0.16, 0) -- 保持原始位置
 mainFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 mainFrame.BackgroundTransparency = 0.3 -- 标题栏透明度20%
@@ -446,10 +476,10 @@ local isMinimized = false
 local function updateToggleButton()
     if isMinimized then
         toggleBtn.Text = "+" -- 最小化状态显示+按钮
-        toggleBtn.BackgroundColor3 = Color3.fromRGB(60, 100, 200)
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 255) -- 紫色
     else
         toggleBtn.Text = "-" -- 正常状态显示-按钮
-        toggleBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 255) -- 紫色
     end
 end
 updateToggleButton()
@@ -508,7 +538,7 @@ titleLabel.TextXAlignment = Enum.TextXAlignment.Left -- 左对齐文本
 titleLabel.Parent = mainFrame
 
 local attachPlayerScroll = Instance.new("ScrollingFrame")
-attachPlayerScroll.Size = UDim2.new(1, -12, 0.35, 0)
+attachPlayerScroll.Size = UDim2.new(1, -12, 0.65, 0)
 attachPlayerScroll.Position = UDim2.new(0, 6, 0, 35)
 attachPlayerScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 attachPlayerScroll.BackgroundTransparency = 1
@@ -539,9 +569,9 @@ local function refreshAttachPlayerList()
             local btn = Instance.new("TextButton")
             btn.Size = UDim2.new(0.95, 0, 0, 30)
             btn.Position = UDim2.new(0.025, 0, 0, y)
-            btn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+            btn.BackgroundColor3 = Color3.fromRGB(173, 216, 230)
             btn.Text = ""
-            btn.BorderSizePixel = 0
+            btn.BorderSizePixel = 1
             btn.AutoButtonColor = true
             btn.Parent = attachPlayerScroll
             local btnCorner = Instance.new("UICorner")
@@ -566,7 +596,7 @@ local function refreshAttachPlayerList()
             nameLabel.Position = UDim2.new(0, 26, 0, 0)
             nameLabel.BackgroundTransparency = 1
             nameLabel.Text = "  " .. player.DisplayName .. " (" .. player.Name .. ")"
-            nameLabel.TextColor3 = Color3.fromRGB(255, 255, 0)
+            nameLabel.TextColor3 = Color3.fromRGB(150, 0, 255)
             nameLabel.TextXAlignment = Enum.TextXAlignment.Left
             nameLabel.TextScaled = false
             nameLabel.TextSize = 13
@@ -578,9 +608,9 @@ local function refreshAttachPlayerList()
             btn.MouseButton1Click:Connect(function()
                 selectedPlayer = player
                 for _, b in playerButtons do
-                    b.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+                    b.BackgroundColor3 = Color3.fromRGB(210, 180, 140)
                 end
-                btn.BackgroundColor3 = Color3.fromRGB(80, 120, 200)
+                btn.BackgroundColor3 = Color3.fromRGB(135, 206, 235)
             end)
 
             table.insert(playerButtons, btn)
@@ -613,14 +643,14 @@ Players.PlayerRemoving:Connect(refreshAttachPlayerList)
 
 local divider = Instance.new("Frame")
 divider.Size = UDim2.new(1, -12, 0, 1)
-divider.Position = UDim2.new(0, 6, 0, 0.42)
+divider.Position = UDim2.new(0, 6, 0, 0.37)
 divider.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
 divider.BorderSizePixel = 0
 divider.Parent = mainFrame
 
 local flingTitle = Instance.new("TextLabel")
 flingTitle.Size = UDim2.new(1, -12, 0, 20)
-flingTitle.Position = UDim2.new(0, 6, 0, 0.44)
+flingTitle.Position = UDim2.new(0, 6, 0, 0.39)
 flingTitle.BackgroundTransparency = 1
 flingTitle.Text = "甩飞控制"
 flingTitle.TextColor3 = Color3.fromRGB(255, 165, 0)
@@ -632,9 +662,9 @@ flingTitle.Parent = mainFrame
 
 local flingTargetFrame = Instance.new("Frame")
 flingTargetFrame.Size = UDim2.new(0.765, -12, 0, 25.5) -- 减小15%
-flingTargetFrame.Position = UDim2.new(0, 6, 0, 0.49)
-flingTargetFrame.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
-flingTargetFrame.BackgroundTransparency = 0 -- 设置半透明
+flingTargetFrame.Position = UDim2.new(0, 6, 0, 0.44)
+flingTargetFrame.BackgroundColor3 = Color3.fromRGB(173, 216, 230)
+flingTargetFrame.BackgroundTransparency = 0
 flingTargetFrame.BorderSizePixel = 0
 flingTargetFrame.Parent = mainFrame
 local flingTargetCorner = Instance.new("UICorner")
@@ -666,9 +696,9 @@ flingArrowBtn.Parent = flingTargetFrame
 
 local flingOptionsList = Instance.new("ScrollingFrame")
 flingOptionsList.Size = UDim2.new(0.765, -12, 0, 25.5) -- 减小15%
-flingOptionsList.Position = UDim2.new(0, 6, 0, 0.49 + 25.5/70)
-flingOptionsList.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
-flingOptionsList.BackgroundTransparency = 0.5 -- 设置半透明
+flingOptionsList.Position = UDim2.new(0, 6, 0, 0.44 + 25.5/55)
+flingOptionsList.BackgroundColor3 = Color3.fromRGB(173, 216, 230)
+flingOptionsList.BackgroundTransparency = 0
 flingOptionsList.ScrollBarThickness = 4
 flingOptionsList.BorderSizePixel = 0
 flingOptionsList.Visible = false
@@ -682,6 +712,7 @@ flingArrowBtn.MouseButton1Click:Connect(function()
     isFlingOptionsOpen = not isFlingOptionsOpen
     flingOptionsList.Visible = isFlingOptionsOpen
     flingArrowBtn.Text = isFlingOptionsOpen and "▲" or "▼"
+    toggleBtn.Visible = true -- 确保展开甩飞选项时最小化按钮可见
     
     if isFlingOptionsOpen then
         for _, child in ipairs(flingOptionsList:GetChildren()) do
@@ -692,20 +723,20 @@ flingArrowBtn.MouseButton1Click:Connect(function()
         
         local options, playerInfo = getFlingTargetOptions()
         local y = 0
-        local maxHeight = 150
+        local maxHeight = 250
         
         for _, opt in ipairs(options) do
             local optBtn = Instance.new("TextButton")
             optBtn.Size = UDim2.new(1, 0, 0, 25.5) -- 减小15%
             optBtn.Position = UDim2.new(0, 0, 0, y)
             
-            local isSelected = opt == selectedTarget
+            local isSelected = table.find(selectedTargets, opt) ~= nil
             if not isSelected and playerInfo[selectedTarget] and playerInfo[opt] and playerInfo[opt].name == playerInfo[selectedTarget].name then
                 isSelected = true
             end
             
-            optBtn.BackgroundColor3 = isSelected and Color3.fromRGB(80, 120, 200) or Color3.fromRGB(70, 70, 70)
-            optBtn.BackgroundTransparency = 0.5 -- 设置半透明
+            optBtn.BackgroundColor3 = isSelected and Color3.fromRGB(135, 206, 235) or Color3.fromRGB(173, 216, 230)
+            optBtn.BackgroundTransparency = 0
             optBtn.Text = ""
             optBtn.TextScaled = false
             optBtn.TextSize = 12 -- 略微减小字体
@@ -717,10 +748,28 @@ flingArrowBtn.MouseButton1Click:Connect(function()
             corner.CornerRadius = UDim.new(0, 8)
             corner.Parent = optBtn
             
+            -- 新增：复选框
+            local checkbox = Instance.new("TextLabel")
+            checkbox.Size = UDim2.new(0, 20, 0, 20)
+            checkbox.Position = UDim2.new(0, 2, 0.5, -10)
+            checkbox.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+            checkbox.BackgroundTransparency = 0
+            checkbox.Text = isSelected and "✓" or ""
+            checkbox.TextColor3 = Color3.fromRGB(0, 150, 0)
+            checkbox.TextScaled = true
+            checkbox.TextSize = 14
+            checkbox.Font = Enum.Font.SourceSansBold
+            checkbox.BorderSizePixel = 1
+            checkbox.BorderColor3 = Color3.fromRGB(0, 0, 0)
+            checkbox.Parent = optBtn
+            local checkboxCorner = Instance.new("UICorner")
+            checkboxCorner.CornerRadius = UDim.new(0, 4)
+            checkboxCorner.Parent = checkbox
+            
             if opt ~= "全部" and opt ~= "随机" and playerInfo[opt] then
                 local thumb = Instance.new("ImageLabel")
                 thumb.Size = UDim2.new(0, 20.4, 0, 20.4) -- 减小15%
-                thumb.Position = UDim2.new(0, 3, 0, 2.55)
+                thumb.Position = UDim2.new(0, 25, 0, 2.55)
                 thumb.BackgroundTransparency = 1
                 thumb.Parent = optBtn
                 local thumbCorner = Instance.new("UICorner")
@@ -732,11 +781,11 @@ flingArrowBtn.MouseButton1Click:Connect(function()
                 thumb.Image = thumbUrl
                 
                 local nameLabel = Instance.new("TextLabel")
-                nameLabel.Size = UDim2.new(1, -30, 1, 0)
-                nameLabel.Position = UDim2.new(0, 28, 0, 0)
+                nameLabel.Size = UDim2.new(1, -55, 1, 0)
+                nameLabel.Position = UDim2.new(0, 50, 0, 0)
                 nameLabel.BackgroundTransparency = 1
                 nameLabel.Text = opt .. "甩飞"
-                nameLabel.TextColor3 = Color3.fromRGB(0, 255, 156)
+                nameLabel.TextColor3 = Color3.fromRGB(0, 0, 139) -- 深蓝色
                 nameLabel.TextXAlignment = Enum.TextXAlignment.Left
                 nameLabel.TextScaled = false
                 nameLabel.TextSize = 17 -- 略微减小字体
@@ -744,11 +793,11 @@ flingArrowBtn.MouseButton1Click:Connect(function()
                 nameLabel.Parent = optBtn
             else
                 local nameLabel = Instance.new("TextLabel")
-                nameLabel.Size = UDim2.new(1, -6, 1, 0)
-                nameLabel.Position = UDim2.new(0, 3, 0, 0)
+                nameLabel.Size = UDim2.new(1, -28, 1, 0)
+                nameLabel.Position = UDim2.new(0, 28, 0, 0)
                 nameLabel.BackgroundTransparency = 1
                 nameLabel.Text = opt .. "甩飞"
-                nameLabel.TextColor3 = Color3.fromRGB(255, 255, 156)
+                nameLabel.TextColor3 = Color3.fromRGB(150, 0, 255)
                 nameLabel.TextXAlignment = Enum.TextXAlignment.Left
                 nameLabel.TextScaled = false
                 nameLabel.TextSize = 14 -- 略微减小字体
@@ -757,8 +806,51 @@ flingArrowBtn.MouseButton1Click:Connect(function()
             end
             
             optBtn.MouseButton1Click:Connect(function()
-                selectedTarget = opt
-                flingTargetLabel.Text = opt
+                -- 处理多选逻辑
+                local index = table.find(selectedTargets, opt)
+                
+                -- 特殊处理"全部"选项
+                if opt == "全部" then
+                    if index then
+                        -- 取消选中"全部"，清空其他选择
+                        table.clear(selectedTargets)
+                        selectedTarget = ""
+                    else
+                        -- 选中"全部"，清空其他选择
+                        table.clear(selectedTargets)
+                        table.insert(selectedTargets, opt)
+                        selectedTarget = opt
+                    end
+                else
+                    -- 处理其他选项
+                    local allIndex = table.find(selectedTargets, "全部")
+                    if allIndex then
+                        -- 如果已选中"全部"，先移除它
+                        table.remove(selectedTargets, allIndex)
+                    end
+                    
+                    if index then
+                        -- 取消选中
+                        table.remove(selectedTargets, index)
+                    else
+                        -- 添加选中
+                        table.insert(selectedTargets, opt)
+                    end
+                    
+                    -- 更新selectedTarget（保持兼容性）
+                    selectedTarget = #selectedTargets > 0 and selectedTargets[1] or ""
+                end
+                
+                -- 更新显示的目标文本
+                if #selectedTargets == 0 then
+                    flingTargetLabel.Text = "未选择"
+                elseif #selectedTargets == 1 then
+                    flingTargetLabel.Text = selectedTargets[1]
+                else
+                    flingTargetLabel.Text = "已选择 " .. #selectedTargets .. " 个目标"
+                end
+                
+                -- 重新生成选项列表以更新复选框状态
                 isFlingOptionsOpen = false
                 flingOptionsList.Visible = false
                 flingArrowBtn.Text = "▼"
@@ -773,9 +865,169 @@ flingArrowBtn.MouseButton1Click:Connect(function()
     end
 end)
 
+-- 添加点击flingTitle时的功能
+flingTitle.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        -- 直接实现与flingArrowBtn相同的功能
+        isFlingOptionsOpen = not isFlingOptionsOpen
+        flingOptionsList.Visible = isFlingOptionsOpen
+        flingArrowBtn.Text = isFlingOptionsOpen and "▲" or "▼"
+        
+        if isFlingOptionsOpen then
+            for _, child in ipairs(flingOptionsList:GetChildren()) do
+                if child:IsA("TextButton") then
+                    child:Destroy()
+                end
+            end
+            
+            local options, playerInfo = getFlingTargetOptions()
+            local y = 0
+            local maxHeight = 150
+            
+            for _, opt in ipairs(options) do
+                local optBtn = Instance.new("TextButton")
+                optBtn.Size = UDim2.new(1, 0, 0, 25.5) -- 减小15%
+                optBtn.Position = UDim2.new(0, 0, 0, y)
+                
+                local isSelected = table.find(selectedTargets, opt) ~= nil
+                if not isSelected and playerInfo[selectedTarget] and playerInfo[opt] and playerInfo[opt].name == playerInfo[selectedTarget].name then
+                    isSelected = true
+                end
+                
+                optBtn.BackgroundColor3 = isSelected and Color3.fromRGB(135, 206, 235) or Color3.fromRGB(173, 216, 230)
+                optBtn.BackgroundTransparency = 0 -- 设置不透明
+                optBtn.Text = ""
+                optBtn.TextScaled = false
+                optBtn.TextSize = 12 -- 略微减小字体
+                optBtn.Font = Enum.Font.SourceSans
+                optBtn.BorderSizePixel = 0
+                optBtn.Parent = flingOptionsList
+                
+                local corner = Instance.new("UICorner")
+                corner.CornerRadius = UDim.new(0, 8)
+                corner.Parent = optBtn
+                
+                -- 新增：复选框
+                local checkbox = Instance.new("TextLabel")
+                checkbox.Size = UDim2.new(0, 20, 0, 20)
+                checkbox.Position = UDim2.new(0, 2, 0.5, -10)
+                checkbox.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+                checkbox.BackgroundTransparency = 0
+                checkbox.Text = isSelected and "✓" or ""
+                checkbox.TextColor3 = Color3.fromRGB(0, 150, 0)
+                checkbox.TextScaled = true
+                checkbox.TextSize = 14
+                checkbox.Font = Enum.Font.SourceSansBold
+                checkbox.BorderSizePixel = 1
+                checkbox.BorderColor3 = Color3.fromRGB(0, 0, 0)
+                checkbox.Parent = optBtn
+                local checkboxCorner = Instance.new("UICorner")
+                checkboxCorner.CornerRadius = UDim.new(0, 4)
+                checkboxCorner.Parent = checkbox
+                
+                if opt ~= "全部" and opt ~= "随机" and playerInfo[opt] then
+                    local thumb = Instance.new("ImageLabel")
+                    thumb.Size = UDim2.new(0, 20.4, 0, 20.4) -- 减小15%
+                    thumb.Position = UDim2.new(0, 25, 0, 2.55)
+                    thumb.BackgroundTransparency = 1
+                    thumb.Parent = optBtn
+                    local thumbCorner = Instance.new("UICorner")
+                    thumbCorner.CornerRadius = UDim.new(1, 0)
+                    thumbCorner.Parent = thumb
+                    local thumbType = Enum.ThumbnailType.HeadShot
+                    local thumbSize = Enum.ThumbnailSize.Size48x48
+                    local thumbUrl = Players:GetUserThumbnailAsync(playerInfo[opt].userId, thumbType, thumbSize)
+                    thumb.Image = thumbUrl
+                    
+                    local nameLabel = Instance.new("TextLabel")
+                    nameLabel.Size = UDim2.new(1, -55, 1, 0)
+                    nameLabel.Position = UDim2.new(0, 50, 0, 0)
+                    nameLabel.BackgroundTransparency = 1
+                    nameLabel.Text = opt .. "甩飞"
+                    nameLabel.TextColor3 = Color3.fromRGB(0, 0, 139) -- 深蓝色
+                    nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+                    nameLabel.TextScaled = false
+                    nameLabel.TextSize = 17 -- 略微减小字体
+                    nameLabel.Font = Enum.Font.SourceSansBold 
+                    nameLabel.Parent = optBtn
+                else
+                    local nameLabel = Instance.new("TextLabel")
+                    nameLabel.Size = UDim2.new(1, -28, 1, 0)
+                    nameLabel.Position = UDim2.new(0, 28, 0, 0)
+                    nameLabel.BackgroundTransparency = 1
+                    nameLabel.Text = opt .. "甩飞"
+                    nameLabel.TextColor3 = Color3.fromRGB(150, 0, 255)
+                    nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+                    nameLabel.TextScaled = false
+                    nameLabel.TextSize = 14 -- 略微减小字体
+                    nameLabel.Font = Enum.Font.SourceSansBold
+                    nameLabel.Parent = optBtn
+                end
+                
+                optBtn.MouseButton1Click:Connect(function()
+                    -- 处理多选逻辑
+                    local index = table.find(selectedTargets, opt)
+                    
+                    -- 特殊处理"全部"选项
+                    if opt == "全部" then
+                        if index then
+                            -- 取消选中"全部"，清空其他选择
+                            table.clear(selectedTargets)
+                            selectedTarget = ""
+                        else
+                            -- 选中"全部"，清空其他选择
+                            table.clear(selectedTargets)
+                            table.insert(selectedTargets, opt)
+                            selectedTarget = opt
+                        end
+                    else
+                        -- 处理其他选项
+                        local allIndex = table.find(selectedTargets, "全部")
+                        if allIndex then
+                            -- 如果已选中"全部"，先移除它
+                            table.remove(selectedTargets, allIndex)
+                        end
+                        
+                        if index then
+                            -- 取消选中
+                            table.remove(selectedTargets, index)
+                        else
+                            -- 添加选中
+                            table.insert(selectedTargets, opt)
+                        end
+                        
+                        -- 更新selectedTarget（保持兼容性）
+                        selectedTarget = #selectedTargets > 0 and selectedTargets[1] or ""
+                    end
+                    
+                    -- 更新显示的目标文本
+                    if #selectedTargets == 0 then
+                        flingTargetLabel.Text = "未选择"
+                    elseif #selectedTargets == 1 then
+                        flingTargetLabel.Text = selectedTargets[1]
+                    else
+                        flingTargetLabel.Text = "已选择 " .. #selectedTargets .. " 个目标"
+                    end
+                    
+                    -- 重新生成选项列表以更新复选框状态
+                    isFlingOptionsOpen = false
+                    flingOptionsList.Visible = false
+                    flingArrowBtn.Text = "▼"
+                end)
+                
+                y = y + 30
+            end
+            
+            local dynamicHeight = math.min(y, maxHeight)
+            flingOptionsList.Size = UDim2.new(flingOptionsList.Size.X.Scale, flingOptionsList.Size.X.Offset, 0, dynamicHeight)
+            flingOptionsList.CanvasSize = UDim2.new(0, 0, 0, y)
+        end
+    end
+end)
+
 local bottomFrame = Instance.new("Frame")
 bottomFrame.Size = UDim2.new(1, -12, 0, 66)
-bottomFrame.Position = UDim2.new(0, 6, 1, -72)
+bottomFrame.Position = UDim2.new(0, 6, 1, -70)
 bottomFrame.BackgroundTransparency = 1
 bottomFrame.Parent = mainFrame
 
@@ -896,7 +1148,10 @@ local function toggleMinimize()
         divider.Visible = true
         flingTitle.Visible = true
         flingTargetFrame.Visible = true
-        flingOptionsList.Visible = true
+        -- 最大化时默认收起甩飞UI
+        isFlingOptionsOpen = false
+        flingOptionsList.Visible = false
+        flingArrowBtn.Text = ">"
         flingBtnFrame.Visible = true
         bottomFrame.Visible = true
         
@@ -910,7 +1165,7 @@ local function toggleMinimize()
     else
         isMinimized = true
         originalSize = mainFrame.Size
-        mainFrame.Size = UDim2.new(0.25, 0, 0.15, 0) -- 调整最小化高度和宽度，确保按钮可见
+        mainFrame.Size = UDim2.new(0.25, 0, 0, 30) -- 最小化高度与标题栏相同
         
         -- 最小化状态的按钮位置（同步调整后位置）
         toggleBtn.Position = UDim2.new(1, -23, 0, 6)
@@ -925,9 +1180,8 @@ local function toggleMinimize()
         flingBtnFrame.Visible = false
         bottomFrame.Visible = false
         
-        -- 调整玩家列表在最小化状态下的显示
-        attachPlayerScroll.Size = UDim2.new(1, -12, 0, 80) -- 增加高度以显示更多按钮
-        local visibleCount = 0
+        -- 最小化时不显示玩家列表
+        attachPlayerScroll.Visible = false
         for _, btn in pairs(playerButtons) do
             btn.Visible = false
         end
