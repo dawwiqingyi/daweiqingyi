@@ -427,7 +427,7 @@ screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
 local mainFrame = Instance.new("Frame")
 mainFrame.Size = UDim2.new(0.25, 0, 0.55, 0) -- 减小高度
-mainFrame.Position = UDim2.new(0.05, 0, 0.16, 0) -- 保持原始位置
+mainFrame.Position = UDim2.new(0.20, 0, 0.16, 0) -- 向右移动20%
 mainFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 mainFrame.BackgroundTransparency = 0.3 -- 标题栏透明度20%
 mainFrame.AnchorPoint = Vector2.new(0, 0)
