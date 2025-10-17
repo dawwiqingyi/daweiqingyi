@@ -19,6 +19,184 @@ getgenv().FPDH = workspace.FallenPartsDestroyHeight
 
 local cleanupList = {connections = {}}
 
+-- 提前定义函数，避免nil值调用错误
+local updateFlingButtonState = nil
+local stopFling = nil
+
+-- 防甩飞核心配置
+local AntiFlingConfig = {
+    Enabled = false,
+    MaxVelocity = 80, -- 最大允许速度（超限判定为甩飞）
+    TeleportBack = true, -- 是否传送回之前位置
+    lastPositions = {}, -- 记录玩家正常位置
+    playerCharConnections = {} -- 存储玩家角色连接，用于关闭时清理
+}
+
+-- 连接句柄
+local antiFlingConn = nil
+local playerAddedConn = nil
+
+-- 防甩飞核心逻辑
+local function startAntiFling()
+    -- 初始化玩家位置记录和角色监听
+    for _, player in ipairs(Players:GetPlayers()) do
+        local function initPlayerCharacter(character)
+            task.wait(0.5)
+            local humanoid = character:FindFirstChild("Humanoid")
+            local rootPart = character:FindFirstChild("HumanoidRootPart")
+            if humanoid and rootPart then
+                -- 禁用异常状态
+                humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+                humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+                -- 记录初始位置
+                AntiFlingConfig.lastPositions[player.UserId] = rootPart.Position
+            end
+        end
+
+        -- 初始化当前角色
+        if player.Character then
+            initPlayerCharacter(player.Character)
+        end
+
+        -- 监听角色加载并存储连接
+        local charConn = player.CharacterAdded:Connect(initPlayerCharacter)
+        AntiFlingConfig.playerCharConnections[player.UserId] = charConn
+    end
+
+    -- 监听新玩家加入（存储连接用于关闭时清理）
+    playerAddedConn = Players.PlayerAdded:Connect(function(player)
+        local function initPlayerCharacter(character)
+            task.wait(0.5)
+            local humanoid = character:FindFirstChild("Humanoid")
+            local rootPart = character:FindFirstChild("HumanoidRootPart")
+            if humanoid and rootPart then
+                humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+                humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+                -- 记录初始位置
+                AntiFlingConfig.lastPositions[player.UserId] = rootPart.Position
+            end
+        end
+
+        -- 监听角色加载
+        local charConn = player.CharacterAdded:Connect(initPlayerCharacter)
+        AntiFlingConfig.playerCharConnections[player.UserId] = charConn
+    end)
+
+    -- 心跳检测速度
+    antiFlingConn = RunService.Heartbeat:Connect(function()
+        for _, player in ipairs(Players:GetPlayers()) do
+            local character = player.Character
+            if character then
+                local rootPart = character:FindFirstChild("HumanoidRootPart")
+                local humanoid = character:FindFirstChild("Humanoid")
+                
+                if rootPart and humanoid and humanoid.Health > 0 then
+                    local currentVelocity = rootPart.AssemblyLinearVelocity
+                    local velocityMagnitude = currentVelocity.Magnitude
+
+                    -- 速度超限判定为甩飞
+                    if velocityMagnitude > AntiFlingConfig.MaxVelocity then
+                        -- 位置复位
+                        if AntiFlingConfig.TeleportBack and AntiFlingConfig.lastPositions[player.UserId] then
+                            -- 完全复位：位置、速度和角速度
+                            rootPart.CFrame = CFrame.new(AntiFlingConfig.lastPositions[player.UserId])
+                            rootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                            rootPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+                            -- 额外的角色稳定处理
+                            humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+                        end
+                    else
+                        -- 只在正常速度下记录位置
+                        AntiFlingConfig.lastPositions[player.UserId] = rootPart.Position
+                    end
+                end
+            end
+        end
+    end)
+    
+    -- 添加一个立即复位所有玩家的快捷键（可选）
+    -- 注意：这需要在UI创建部分添加对应的按钮或快捷键处理
+end
+
+-- 停止防甩飞
+local function stopAntiFling()
+    -- 断开心跳检测连接
+    if antiFlingConn then
+        antiFlingConn:Disconnect()
+        antiFlingConn = nil
+    end
+
+    -- 断开玩家加入监听连接
+    if playerAddedConn then
+        playerAddedConn:Disconnect()
+        playerAddedConn = nil
+    end
+
+    -- 断开所有玩家角色连接并还原角色状态
+    for userId, conn in pairs(AntiFlingConfig.playerCharConnections) do
+        if conn.Connected then
+            conn:Disconnect()
+        end
+        -- 还原对应玩家角色的状态
+        local player = Players:GetPlayerByUserId(userId)
+        if player and player.Character then
+            local humanoid = player.Character:FindFirstChild("Humanoid")
+            if humanoid then
+                -- 恢复禁用的角色状态
+                humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, true)
+                humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
+            end
+        end
+    end
+
+    -- 清空所有记录
+    AntiFlingConfig.lastPositions = {}
+    AntiFlingConfig.playerCharConnections = {}
+end
+
+-- 立即复位所有玩家位置的函数
+local function resetAllPlayersPositions()
+    for _, player in ipairs(Players:GetPlayers()) do
+        local character = player.Character
+        if character then
+            local rootPart = character:FindFirstChild("HumanoidRootPart")
+            local humanoid = character:FindFirstChild("Humanoid")
+            
+            if rootPart and humanoid and humanoid.Health > 0 then
+                -- 如果有保存的位置，则复位到保存的位置
+                if AntiFlingConfig.lastPositions[player.UserId] then
+                    rootPart.CFrame = CFrame.new(AntiFlingConfig.lastPositions[player.UserId])
+                    rootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                    rootPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+                    Message("复位成功", player.Name .. " 已重置到正常位置", 2)
+                else
+                    -- 如果没有保存的位置，记录当前位置
+                    AntiFlingConfig.lastPositions[player.UserId] = rootPart.Position
+                    Message("提示", player.Name .. " 位置已记录", 2)
+                end
+            end
+        end
+    end
+end
+
+-- 更新防甩飞按钮状态
+local function updateAntiFlingButtonState()
+    -- 确保按钮存在
+    if antiFlingBtn then
+        -- 直接设置按钮状态
+        if AntiFlingConfig.Enabled then
+            antiFlingBtn.Text = "关闭防甩飞"
+            antiFlingBtn.BackgroundColor3 = Color3.fromRGB(0, 102, 204) -- 蓝色表示开启
+        else
+            antiFlingBtn.Text = "开启防甩飞"
+            antiFlingBtn.BackgroundColor3 = Color3.fromRGB(139, 69, 19) -- 褐色表示关闭
+        end
+        -- 强制更新按钮属性
+        antiFlingBtn.Text = antiFlingBtn.Text
+        antiFlingBtn.BackgroundColor3 = antiFlingBtn.BackgroundColor3
+    end
+end
+
 local function getRoot()
     if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
         return LocalPlayer.Character.HumanoidRootPart
@@ -205,39 +383,59 @@ local SkidFling = function(TargetPlayer)
     end
 
     local SFBasePart = function(BasePart)
+        if not BasePart or not BasePart:IsA("BasePart") then
+            Message("甩飞失败", "目标部件无效", 3)
+            return
+        end
+        
         local startTime = tick()
         local timeLimit = 2
         local angle = 0
 
         repeat
             if not isFlinging then break end
-            if BasePart.Velocity.Magnitude < 50 then
+            if not BasePart or not BasePart:IsA("BasePart") or not BasePart.Parent then break end
+            if not TargetHumanoid or not TargetHumanoid:IsA("Humanoid") then break end
+            
+            local currentVelocity = BasePart.Velocity
+            if not currentVelocity then break end
+            
+            if currentVelocity.Magnitude < 50 then
                 angle = angle + 100
-                FPos(BasePart, CFrame.new(0, 1.5, 0) + TargetHumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(angle), 0, 0))
+                local moveDir = TargetHumanoid.MoveDirection or Vector3.new()
+                FPos(BasePart, CFrame.new(0, 1.5, 0) + moveDir * currentVelocity.Magnitude / 1.25, CFrame.Angles(math.rad(angle), 0, 0))
                 task.wait()
-                FPos(BasePart, CFrame.new(0, -1.5, 0) + TargetHumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(angle), 0, 0))
+                FPos(BasePart, CFrame.new(0, -1.5, 0) + moveDir * currentVelocity.Magnitude / 1.25, CFrame.Angles(math.rad(angle), 0, 0))
                 task.wait()
-                FPos(BasePart, CFrame.new(2.25, 1.5, -2.25) + TargetHumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(angle), 0, 0))
+                FPos(BasePart, CFrame.new(2.25, 1.5, -2.25) + moveDir * currentVelocity.Magnitude / 1.25, CFrame.Angles(math.rad(angle), 0, 0))
                 task.wait()
-                FPos(BasePart, CFrame.new(-2.25, -1.5, 2.25) + TargetHumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(angle), 0, 0))
+                FPos(BasePart, CFrame.new(-2.25, -1.5, 2.25) + moveDir * currentVelocity.Magnitude / 1.25, CFrame.Angles(math.rad(angle), 0, 0))
                 task.wait()
-                FPos(BasePart, CFrame.new(0, 1.5, 0) + TargetHumanoid.MoveDirection, CFrame.Angles(math.rad(angle), 0, 0))
+                FPos(BasePart, CFrame.new(0, 1.5, 0) + moveDir, CFrame.Angles(math.rad(angle), 0, 0))
                 task.wait()
-                FPos(BasePart, CFrame.new(0, -1.5, 0) + TargetHumanoid.MoveDirection, CFrame.Angles(math.rad(angle), 0, 0))
+                FPos(BasePart, CFrame.new(0, -1.5, 0) + moveDir, CFrame.Angles(math.rad(angle), 0, 0))
                 task.wait()
             else
-                FPos(BasePart, CFrame.new(0, 1.5, TargetHumanoid.WalkSpeed), CFrame.Angles(math.rad(90), 0, 0))
+                local walkSpeed = TargetHumanoid.WalkSpeed or 16
+                FPos(BasePart, CFrame.new(0, 1.5, walkSpeed), CFrame.Angles(math.rad(90), 0, 0))
                 task.wait()
-                FPos(BasePart, CFrame.new(0, -1.5, -TargetHumanoid.WalkSpeed), CFrame.Angles(0, 0, 0))
+                FPos(BasePart, CFrame.new(0, -1.5, -walkSpeed), CFrame.Angles(0, 0, 0))
                 task.wait()
-                FPos(BasePart, CFrame.new(0, 1.5, TargetHumanoid.WalkSpeed), CFrame.Angles(math.rad(90), 0, 0))
+                FPos(BasePart, CFrame.new(0, 1.5, walkSpeed), CFrame.Angles(math.rad(90), 0, 0))
                 task.wait()
-                FPos(BasePart, CFrame.new(0, 1.5, TargetRoot.Velocity.Magnitude / 1.25), CFrame.Angles(math.rad(90), 0, 0))
-                task.wait()
-                FPos(BasePart, CFrame.new(0, -1.5, -TargetRoot.Velocity.Magnitude / 1.25), CFrame.Angles(0, 0, 0))
-                task.wait()
-                FPos(BasePart, CFrame.new(0, 1.5, TargetRoot.Velocity.Magnitude / 1.25), CFrame.Angles(math.rad(90), 0, 0))
-                task.wait()
+                
+                if TargetRoot and TargetRoot:IsA("BasePart") then
+                    local rootVelocity = TargetRoot.Velocity
+                    if rootVelocity then
+                        FPos(BasePart, CFrame.new(0, 1.5, rootVelocity.Magnitude / 1.25), CFrame.Angles(math.rad(90), 0, 0))
+                        task.wait()
+                        FPos(BasePart, CFrame.new(0, -1.5, -rootVelocity.Magnitude / 1.25), CFrame.Angles(0, 0, 0))
+                        task.wait()
+                        FPos(BasePart, CFrame.new(0, 1.5, rootVelocity.Magnitude / 1.25), CFrame.Angles(math.rad(90), 0, 0))
+                        task.wait()
+                    end
+                end
+                
                 FPos(BasePart, CFrame.new(0, -1.5, 0), CFrame.Angles(math.rad(90), 0, 0))
                 task.wait()
                 FPos(BasePart, CFrame.new(0, -1.5, 0), CFrame.Angles(0, 0, 0))
@@ -247,7 +445,7 @@ local SkidFling = function(TargetPlayer)
                 FPos(BasePart, CFrame.new(0, -1.5, 0), CFrame.Angles(0, 0, 0))
                 task.wait()
             end
-        until not isFlinging or BasePart.Velocity.Magnitude > 500 or BasePart.Parent ~= TargetChar or TargetPlayer.Parent ~= Players or TargetHumanoid.Sit or LocalHumanoid.Health <= 0 or tick() > startTime + timeLimit
+        until not isFlinging or (BasePart and BasePart:IsA("BasePart") and BasePart.Velocity and BasePart.Velocity.Magnitude > 500) or not BasePart or not BasePart.Parent or BasePart.Parent ~= TargetChar or TargetPlayer.Parent ~= Players or (TargetHumanoid and TargetHumanoid.Sit) or (LocalHumanoid and LocalHumanoid.Health <= 0) or tick() > startTime + timeLimit
     end
 
     workspace.FallenPartsDestroyHeight = 0/0
@@ -298,6 +496,12 @@ local startFling = function()
         Message("提示", "已在甩飞中，无需重复开启", 2)
         return
     end
+    
+    -- 检查防甩飞是否开启
+    if AntiFlingConfig.Enabled then
+        Message("甩飞失败", "请关闭防甩飞后再开启甩飞", 3)
+        return
+    end
 
     if not LocalPlayer.Character then
         Message("甩飞失败", "请先加载角色", 3)
@@ -306,6 +510,9 @@ local startFling = function()
 
     isFlinging = true
     Message("甩飞开启", "目标数量：" .. #selectedTargets, 2)
+    
+    -- 更新按钮状态
+    updateFlingButtonState()
 
     flingConnection = task.spawn(function()
         while isFlinging do
@@ -377,6 +584,9 @@ local stopFling = function()
         task.cancel(flingConnection)
         flingConnection = nil
     end
+    
+    -- 更新按钮状态
+    updateFlingButtonState()
 
     local localHumanoid = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
     if localHumanoid then
@@ -426,8 +636,8 @@ screenGui.ResetOnSpawn = false
 screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0.25, 0, 0.55, 0) -- 减小高度
-mainFrame.Position = UDim2.new(0.20, 0, 0.16, 0) -- 向右移动20%
+mainFrame.Size = UDim2.new(0.30, 0, 0.55, 0) -- 减小高度
+mainFrame.Position = UDim2.new(0.16, 0, 0.16, 0) -- 向右移动20%
 mainFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 mainFrame.BackgroundTransparency = 0.3 -- 标题栏透明度20%
 mainFrame.AnchorPoint = Vector2.new(0, 0)
@@ -1071,35 +1281,37 @@ flingBtnFrame.Position = UDim2.new(0, 0, 0, 36)
 flingBtnFrame.BackgroundTransparency = 1
 flingBtnFrame.Parent = bottomFrame
 
-local startFlingBtn = Instance.new("TextButton")
-startFlingBtn.Size = UDim2.new(0.48, -2, 1, 0)
-startFlingBtn.Position = UDim2.new(0, 0, 0, 0)
-startFlingBtn.Text = "开启甩飞"
-startFlingBtn.TextScaled = false
-startFlingBtn.TextSize = 22
-startFlingBtn.BackgroundColor3 = Color3.fromRGB(255, 150, 0)
-startFlingBtn.TextColor3 = Color3.fromRGB(255,255,255)
-startFlingBtn.BorderSizePixel = 0
-startFlingBtn.Font = Enum.Font.SourceSansSemibold
-startFlingBtn.Parent = flingBtnFrame
-local startFlingCorner = Instance.new("UICorner")
-startFlingCorner.CornerRadius = UDim.new(0, 10)
-startFlingCorner.Parent = startFlingBtn
+-- 创建防甩飞按钮（放在左侧）
+local antiFlingBtn = Instance.new("TextButton")
+antiFlingBtn.Size = UDim2.new(0.48, -2, 1, 0)
+antiFlingBtn.Position = UDim2.new(0, 0, 0, 0)
+antiFlingBtn.Text = "开启防甩飞" -- 初始状态为关闭
+antiFlingBtn.TextScaled = false
+antiFlingBtn.TextSize = 20
+antiFlingBtn.BackgroundColor3 = Color3.fromRGB(139, 69, 19) -- 初始为褐色
+antiFlingBtn.TextColor3 = Color3.fromRGB(255,255,255)
+antiFlingBtn.BorderSizePixel = 0
+antiFlingBtn.Font = Enum.Font.SourceSansSemibold
+antiFlingBtn.Parent = flingBtnFrame
+local antiFlingCorner = Instance.new("UICorner")
+antiFlingCorner.CornerRadius = UDim.new(0, 10)
+antiFlingCorner.Parent = antiFlingBtn
 
-local stopFlingBtn = Instance.new("TextButton")
-stopFlingBtn.Size = UDim2.new(0.48, -2, 1, 0)
-stopFlingBtn.Position = UDim2.new(0.52, 2, 0, 0)
-stopFlingBtn.Text = "关闭甩飞"
-stopFlingBtn.TextScaled = false
-stopFlingBtn.TextSize = 22
-stopFlingBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 200)
-stopFlingBtn.TextColor3 = Color3.fromRGB(255,255,255)
-stopFlingBtn.BorderSizePixel = 0
-stopFlingBtn.Font = Enum.Font.SourceSansSemibold
-stopFlingBtn.Parent = flingBtnFrame
-local stopFlingCorner = Instance.new("UICorner")
-stopFlingCorner.CornerRadius = UDim.new(0, 10)
-stopFlingCorner.Parent = stopFlingBtn
+-- 创建甩飞切换按钮（放在右侧）
+local toggleFlingBtn = Instance.new("TextButton")
+toggleFlingBtn.Size = UDim2.new(0.48, -2, 1, 0)
+toggleFlingBtn.Position = UDim2.new(0.52, 2, 0, 0)
+toggleFlingBtn.Text = "开启甩飞" -- 初始状态为开启
+toggleFlingBtn.TextScaled = false
+toggleFlingBtn.TextSize = 22
+toggleFlingBtn.BackgroundColor3 = Color3.fromRGB(255, 150, 0) -- 初始为黄色
+toggleFlingBtn.TextColor3 = Color3.fromRGB(255,255,255)
+toggleFlingBtn.BorderSizePixel = 0
+toggleFlingBtn.Font = Enum.Font.SourceSansSemibold
+toggleFlingBtn.Parent = flingBtnFrame
+local toggleFlingCorner = Instance.new("UICorner")
+toggleFlingCorner.CornerRadius = UDim.new(0, 10)
+toggleFlingCorner.Parent = toggleFlingBtn
 
 attachBtn.MouseButton1Click:Connect(function()
     if selectedPlayer then
@@ -1117,14 +1329,63 @@ detachBtn.MouseButton1Click:Connect(function()
     attachBtn.Text = "吸附"
 end)
 
-startFlingBtn.MouseButton1Click:Connect(startFling)
-stopFlingBtn.MouseButton1Click:Connect(stopFling)
+-- 甩飞切换按钮点击事件
+updateFlingButtonState = function()
+    if toggleFlingBtn then -- 检查toggleFlingBtn是否存在
+        if isFlinging then
+            toggleFlingBtn.Text = "关闭甩飞"
+            toggleFlingBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 200) -- 紫色表示开启中
+        else
+            toggleFlingBtn.Text = "开启甩飞"
+            toggleFlingBtn.BackgroundColor3 = Color3.fromRGB(255, 150, 0) -- 黄色表示未开启
+        end
+    end
+end
+
+-- 初始化按钮状态
+updateFlingButtonState()
+updateAntiFlingButtonState()
+
+-- 防甩飞按钮点击事件
+antiFlingBtn.MouseButton1Click:Connect(function()
+    -- 切换状态
+    AntiFlingConfig.Enabled = not AntiFlingConfig.Enabled
+    
+    -- 直接更新按钮文本和颜色，不依赖updateAntiFlingButtonState函数
+    if AntiFlingConfig.Enabled then
+        antiFlingBtn.Text = "关闭防甩飞"
+        antiFlingBtn.BackgroundColor3 = Color3.fromRGB(0, 102, 204) -- 蓝色表示开启
+        startAntiFling()
+        Message("防甩飞已开启", "速度超过" .. AntiFlingConfig.MaxVelocity .. "将自动防御", 2)
+    else
+        antiFlingBtn.Text = "开启防甩飞"
+        antiFlingBtn.BackgroundColor3 = Color3.fromRGB(139, 69, 19) -- 褐色表示关闭
+        stopAntiFling()
+        Message("防甩飞已关闭", "不再自动防御甩飞攻击", 2)
+    end
+    
+    -- 强制应用更改
+    antiFlingBtn.Text = antiFlingBtn.Text
+    antiFlingBtn.BackgroundColor3 = antiFlingBtn.BackgroundColor3
+end)
+
+-- 甩飞按钮点击事件
+toggleFlingBtn.MouseButton1Click:Connect(function()
+    if isFlinging then
+        stopFling()
+    else
+        startFling()
+    end
+end)
 
 -- 关闭按钮逻辑
 closeBtn.MouseButton1Click:Connect(function()
     -- 停止所有功能
     stopAttaching()
     stopFling()
+    if AntiFlingConfig.Enabled then
+        stopAntiFling()
+    end
     -- 销毁UI
     screenGui:Destroy()
 end)
@@ -1165,7 +1426,7 @@ local function toggleMinimize()
     else
         isMinimized = true
         originalSize = mainFrame.Size
-        mainFrame.Size = UDim2.new(0.25, 0, 0, 30) -- 最小化高度与标题栏相同
+        mainFrame.Size = UDim2.new(0.30, 0, 0, 30) -- 最小化高度与标题栏相同
         
         -- 最小化状态的按钮位置（同步调整后位置）
         toggleBtn.Position = UDim2.new(1, -23, 0, 6)
@@ -1185,6 +1446,8 @@ local function toggleMinimize()
         for _, btn in pairs(playerButtons) do
             btn.Visible = false
         end
+        -- 初始化visibleCount变量
+        local visibleCount = 0
         for _, btn in pairs(playerButtons) do
             if visibleCount < 3 then -- 增加可见按钮数量
                 btn.Visible = true
