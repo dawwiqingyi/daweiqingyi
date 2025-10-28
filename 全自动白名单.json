@@ -1,7 +1,7 @@
 {
   "version": "1.0",
-  "description": "白名单配置文件 - 用户名验证",
-  "updated": "2024-01-15",
+  "description": "挂机全自动白名单配置文件 - 用户名验证",
+  "updated": "2025-10-15",
   "usernames": {
     "weidada5": true,
     "得不到就受着": true,
@@ -74,6 +74,7 @@
     "Sace_cust": true,
     "xiaoming198": true,
     "hejiu2": true,
+    "aassddff6661": true,
     "91xfh78": true
     
     
