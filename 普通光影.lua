@@ -1,8 +1,33 @@
 -- Roblox Graphics Enhancher
+-- 防止重复加载检查
+if _G.RTXGraphicsEnabled then
+	print("高亮光影已经加载，跳过重复加载")
+	return
+end
+
 local light = game.Lighting
+-- 保存原始光照设置以便关闭时恢复
+local originalLightingSettings = {
+	Ambient = light.Ambient,
+	Brightness = light.Brightness,
+	ColorShift_Bottom = light.ColorShift_Bottom,
+	ColorShift_Top = light.ColorShift_Top,
+	EnvironmentDiffuseScale = light.EnvironmentDiffuseScale,
+	EnvironmentSpecularScale = light.EnvironmentSpecularScale,
+	GlobalShadows = light.GlobalShadows,
+	OutdoorAmbient = light.OutdoorAmbient,
+	ShadowSoftness = light.ShadowSoftness,
+	GeographicLatitude = light.GeographicLatitude,
+	ExposureCompensation = light.ExposureCompensation
+}
+
+-- 清除现有效果
 for i, v in pairs(light:GetChildren()) do
 	v:Destroy()
 end
+
+-- 创建效果表以便后续管理
+local createdEffects = {}
 
 local ter = workspace.Terrain
 local color = Instance.new("ColorCorrectionEffect")
@@ -14,6 +39,12 @@ color.Parent = light
 bloom.Parent = light
 sun.Parent = light
 blur.Parent = light
+
+-- 将创建的效果添加到表中
+createdEffects["color"] = color
+createdEffects["bloom"] = bloom
+createdEffects["sun"] = sun
+createdEffects["blur"] = blur
 
 -- enable or disable shit
 
@@ -139,4 +170,98 @@ s.Enabled = true
 s.Intensity = 0.01
 s.Spread = 0.146
 
-print("RTX Graphics loaded! Created by BrickoIcko")
+-- 将额外创建的效果添加到表中
+createdEffects["b"] = b
+createdEffects["c"] = c
+createdEffects["d"] = d
+createdEffects["e"] = e
+createdEffects["e2"] = e2
+createdEffects["s"] = s
+
+-- 保存地形原始设置
+local originalTerrainSettings = {
+	WaterWaveSize = ter.WaterWaveSize,
+	WaterWaveSpeed = ter.WaterWaveSpeed,
+	WaterTransparency = ter.WaterTransparency,
+	WaterReflectance = ter.WaterReflectance
+}
+
+-- 高亮光影状态变量
+_G.RTXGraphicsEnabled = true
+
+-- 关闭高亮光影的函数
+function _G.DisableRTXGraphics()
+	print("正在关闭高亮光影...")
+	
+	-- 销毁所有创建的效果
+	for name, effect in pairs(createdEffects) do
+		if effect and effect:IsA("Instance") then
+			effect:Destroy()
+		end
+	end
+	
+	-- 清空效果表
+	createdEffects = {}
+	
+	-- 恢复原始光照设置
+	for property, value in pairs(originalLightingSettings) do
+		if light and light[property] ~= nil then
+			light[property] = value
+		end
+	end
+	
+	-- 恢复地形原始设置
+	for property, value in pairs(originalTerrainSettings) do
+		if ter and ter[property] ~= nil then
+			ter[property] = value
+		end
+	end
+	
+	_G.RTXGraphicsEnabled = false
+	print("高亮光影已关闭！")
+end
+
+-- 开启高亮光影的函数
+function _G.EnableRTXGraphics()
+	if _G.RTXGraphicsEnabled then
+		print("高亮光影已经开启！")
+		return
+	end
+	
+	print("正在开启高亮光影...")
+	
+	-- 重新加载高亮光影脚本
+	local success = pcall(function()
+		local rtxCode = readfile("高亮光影")
+		if rtxCode then
+			loadstring(rtxCode)()
+		else
+			warn("高亮光影文件未找到")
+		end
+	end)
+	
+	if not success then
+		warn("高亮光影开启失败")
+	end
+end
+
+-- 切换高亮光影状态的函数
+function _G.ToggleRTXGraphics()
+	if _G.RTXGraphicsEnabled then
+		_G.DisableRTXGraphics()
+	else
+		_G.EnableRTXGraphics()
+	end
+end
+
+-- 获取高亮光影状态的函数
+function _G.GetRTXGraphicsStatus()
+	return _G.RTXGraphicsEnabled
+end
+
+print("高亮光影已加载！作者：BrickoIcko")
+print("可用命令：")
+print("  _G.DisableRTXGraphics() - 关闭高亮光影")
+print("  _G.EnableRTXGraphics() - 开启高亮光影")
+print("  _G.ToggleRTXGraphics() - 切换高亮光影状态")
+print("  _G.GetRTXGraphicsStatus() - 获取高亮光影状态")
