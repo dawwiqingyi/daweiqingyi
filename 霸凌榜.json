@@ -1,0 +1,15 @@
+[
+  {
+    "rank": 1,
+    "userId": 123456789,
+    "name": "PlayerUserName",
+    "displayName": "玩家昵称"
+  },
+  {
+    "rank": 2,
+    "userId": 987654321,
+    "name": "AnotherUser",
+    "displayName": "另一个玩家"
+  }
+]
+
