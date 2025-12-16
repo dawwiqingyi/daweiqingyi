@@ -1,35 +1,10 @@
 [
   {
-    "rank": 1,
-    "userId": 123456789,
-    "name": "PlayerUserName",
-    "displayName": "玩家昵称"
-  }, {
-    "rank": 1,
-    "userId": 123456789,
-    "name": "PlayerUserName",
-    "displayName": "玩家昵称"
-  }, {
-    "rank": 1,
-    "userId": 123456789,
-    "name": "PlayerUserName",
-    "displayName": "玩家昵称"
-  }, {
-    "rank": 1,
-    "userId": 123456789,
-    "name": "PlayerUserName",
-    "displayName": "玩家昵称"
-  }, {
-    "rank": 1,
-    "userId": 123456789,
-    "name": "PlayerUserName",
-    "displayName": "玩家昵称"
+    "username": "PlayerUserName1",
+    "tag": "这是对该玩家的简单介绍或标签文字"
   },
   {
-    "rank": 2,
-    "userId": 987654321,
-    "name": "AnotherUser",
-    "displayName": "另一个玩家"
+    "username": "PlayerUserName2",
+    "tag": "这里写第二个玩家的说明，比如擅长霸凌玩法"
   }
 ]
-
