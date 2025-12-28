@@ -1,6 +1,6 @@
 local AutoChatConfig = { 
-    enabled = true, 
-    userName = "", 
+    enabled = false, 
+    userName = "weidada", 
     targetUserId = 859088490, 
     intervalSeconds = 30, 
     useTeamChat = false, 
