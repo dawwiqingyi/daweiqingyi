@@ -1,7 +1,7 @@
 local AutoChatConfig = {
     enabled = true,
     userName = "",          -- 可选：用户名验证
-    targetUserId = 8590884903,      -- 新增：锁定的玩家ID（必填，替换为实际ID）
+    targetUserId = 85908843,      -- 新增：锁定的玩家ID（必填，替换为实际ID）
     intervalSeconds = 30,
     useTeamChat = false,
     messages = {
