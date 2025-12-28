@@ -1,13 +1,13 @@
 local AutoChatConfig = { 
     enabled = true, 
     userName = "", 
-    targetUserId = 85908843, 
+    targetUserId = 8590884903, 
     intervalSeconds = 30, 
     useTeamChat = false, 
     messages = { 
-        "这是第一个自动消息", 
-        "这是第二个自动消息", 
-        "这是第三个自动消息" 
+        "老虎最可爱", 
+        "萌萌哒", 
+        "嘿呦嘿呦" 
     } 
 }
 
