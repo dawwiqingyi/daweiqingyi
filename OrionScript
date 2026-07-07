@@ -3,38 +3,78 @@ local function MainScript()
     local Players = game:GetService("Players")
     local player = Players.LocalPlayer
     local playerGui = player:WaitForChild("PlayerGui")
+    
     local ScreenGui = Instance.new("ScreenGui")
     ScreenGui.Name = "UpdateNotice"
     ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     ScreenGui.Parent = playerGui
+
     local MainFrame = Instance.new("Frame")
-    MainFrame.Size = UDim2.new(0, 350, 0, 280)
-    MainFrame.Position = UDim2.new(0.5, -175, 0.12, 0)
+    MainFrame.Size = UDim2.new(0, 340, 0, 380)
+    MainFrame.Position = UDim2.new(0.5, -170, 0.00, 0)
     MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
     MainFrame.BorderSizePixel = 0
     MainFrame.Parent = ScreenGui
+    
     local UICorner = Instance.new("UICorner")
     UICorner.CornerRadius = UDim.new(0, 8)
     UICorner.Parent = MainFrame
+    
+ 
     local TitleBar = Instance.new("Frame")
-    TitleBar.Size = UDim2.new(1, 0, 0, 30)
+    TitleBar.Size = UDim2.new(1, 0, 0, 35)
     TitleBar.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
     TitleBar.BorderSizePixel = 0
     TitleBar.Parent = MainFrame
+    
     local TitleCorner = Instance.new("UICorner")
     TitleCorner.CornerRadius = UDim.new(0, 8)
     TitleCorner.Parent = TitleBar
+    
     local TitleLabel = Instance.new("TextLabel")
-    TitleLabel.Size = UDim2.new(1, 0, 1, 0)
+    TitleLabel.Size = UDim2.new(1, -40, 1, 0)
     TitleLabel.BackgroundTransparency = 1
     TitleLabel.Text = "多功能脚本更新公告版本-3.2"
     TitleLabel.TextColor3 = Color3.new(1,1,1)
     TitleLabel.TextSize = 18
     TitleLabel.Font = Enum.Font.SourceSansBold
     TitleLabel.Parent = TitleBar
+
+
+    local CloseBtn = Instance.new("TextButton")
+    CloseBtn.Name = "CloseButton"
+    CloseBtn.Size = UDim2.new(0, 30, 0, 30)
+    CloseBtn.Position = UDim2.new(1, -30, 0, 0)
+    CloseBtn.BackgroundTransparency = 1
+    CloseBtn.Text = "×"
+    CloseBtn.TextColor3 = Color3.new(1,1,1)
+    CloseBtn.TextSize = 24
+    CloseBtn.Font = Enum.Font.SourceSansBold
+    CloseBtn.Parent = TitleBar
+  
+    CloseBtn.MouseButton1Click:Connect(function()
+        ScreenGui:Destroy()
+    end)
+
+
+    local ScrollFrame = Instance.new("ScrollingFrame")
+    ScrollFrame.Name = "TextScrollBox"
+    ScrollFrame.Size = UDim2.new(1, -20, 1, -45)
+    ScrollFrame.Position = UDim2.new(0, 10, 0, 40)
+    ScrollFrame.BackgroundTransparency = 1
+    ScrollFrame.ScrollBarThickness = 6
+    ScrollFrame.ScrollBarImageColor3 = Color3.new(0.7,0.7,0.7)
+    ScrollFrame.CanvasSize = UDim2.new(0,0,2,0)
+    ScrollFrame.Parent = MainFrame
+
+    local UIListLayout = Instance.new("UIListLayout")
+    UIListLayout.Padding = UDim.new(0, 4)
+    UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+    UIListLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+    UIListLayout.Parent = ScrollFrame
+
     local ContentLabel = Instance.new("TextLabel")
-    ContentLabel.Size = UDim2.new(1, -20, 1, -40)
-    ContentLabel.Position = UDim2.new(0, 10, 0, 35)
+    ContentLabel.Size = UDim2.new(1, 0, 0, 480)
     ContentLabel.BackgroundTransparency = 1
     ContentLabel.TextColor3 = Color3.new(1,1,1)
     ContentLabel.TextSize = 14
@@ -42,6 +82,6 @@ local function MainScript()
     ContentLabel.TextWrapped = true
     ContentLabel.TextYAlignment = Enum.TextYAlignment.Top
     ContentLabel.Text = "【一、自动功能优化】\n1.自动刷领收与巨量挂机互斥，同时开启弹出强制提示\n2.显示地图、移动模式判断仅挂机/刷领收开启后可用\n3.自动升级、大小/乘数/吃速/移速不再弹窗\n4.切换大小图自动加载对应脚本\n\n【二、记忆分区升级】\n1.新增虚块生成，支持透明/半透明/不透明三种样式\n2.虚块提供两种关闭方式\n\n【三、动画菜单优化】\n1.修复动画同步异常，上架商城全部新动画包\n2.修复他人看不到你的动画包，新增最近使用动画按钮\n\n【四、UI修复】\n无仇人时人物榜单不再显示底部「查看更多」\n\n脚本已更新\n请查看内部群最新消息\n或者加主Q群：1075988910"
-    ContentLabel.Parent = MainFrame
+    ContentLabel.Parent = ScrollFrame
 end
 MainScript()
