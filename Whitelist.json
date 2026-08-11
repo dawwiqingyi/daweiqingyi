@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "description": "白名单配置文件 - 用户名验证",
+  "description": "傻杯",
   "updated": "2024-01-15",
   "usernames": {
     "weidada5": true,
