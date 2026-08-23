@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "description": "萌新版白名单配置文件 - 用户名验证",
+  "description": "",
   "updated": "2025-11-06",
   "usernames": {
     "algsec": true,
@@ -33,6 +33,7 @@
     "GuiTu6666": true,
     "CARLOTTA666EZ": true,
     "baidayo": true,
+    "Youcanseemehhh": true,
     "asjbdk1": true,
     "SBB_12345o": true,
     "zxx8778": true,
