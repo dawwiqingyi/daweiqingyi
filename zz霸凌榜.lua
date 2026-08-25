@@ -26,6 +26,7 @@ local bullyList = {
     {username = "playerZ777x", tag = "[爱丽丝朋友]会使用脚本"},
     {username = "SuguruGeto_309", tag = "霸凌者"},
     {username = "swickkill", tag = "霸凌者"},
+	{username = "KaiYangX_58858", tag = "老外JIO盆霸凌"},
     {username = "Igndcookie", tag = "必杀的大傻子"},
     {username = "axnknxk", tag = "霸凌虎子，遇见必胖揍"},
     {username = "jacksparrow_789", tag = "霸凌者"},
