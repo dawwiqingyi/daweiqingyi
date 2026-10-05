@@ -27,7 +27,7 @@ local function MainScript()
     local TitleLabel = Instance.new("TextLabel")
     TitleLabel.Size = UDim2.new(1, -35, 1, 0)
     TitleLabel.BackgroundTransparency = 1
-    TitleLabel.Text = "吃吃多功能已更新-----3.4版本"
+    TitleLabel.Text = "吃吃多功能已更新-----3.6版本"
     TitleLabel.TextColor3 = Color3.new(1,1,1)
     TitleLabel.TextSize = 18
     TitleLabel.Font = Enum.Font.SourceSansBold
