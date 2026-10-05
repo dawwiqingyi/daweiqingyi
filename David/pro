@@ -1,0 +1,62 @@
+local function MainScript()
+    print("主脚本运行中...")
+    local Players = game:GetService("Players")
+    local player = Players.LocalPlayer
+    local playerGui = player:WaitForChild("PlayerGui")
+    local ScreenGui = Instance.new("ScreenGui")
+    ScreenGui.Name = "UpdateNotice"
+    ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    ScreenGui.Parent = playerGui
+    local MainFrame = Instance.new("Frame")
+    MainFrame.Size = UDim2.new(0, 350, 0, 280)
+    MainFrame.Position = UDim2.new(0.5, -175, 0.12, 0)
+    MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    MainFrame.BorderSizePixel = 0
+    MainFrame.Parent = ScreenGui
+    local UICorner = Instance.new("UICorner")
+    UICorner.CornerRadius = UDim.new(0, 8)
+    UICorner.Parent = MainFrame
+    local TitleBar = Instance.new("Frame")
+    TitleBar.Size = UDim2.new(1, 0, 0, 30)
+    TitleBar.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+    TitleBar.BorderSizePixel = 0
+    TitleBar.Parent = MainFrame
+    local TitleCorner = Instance.new("UICorner")
+    TitleCorner.CornerRadius = UDim.new(0, 8)
+    TitleCorner.Parent = TitleBar
+    local TitleLabel = Instance.new("TextLabel")
+    TitleLabel.Size = UDim2.new(1, -35, 1, 0)
+    TitleLabel.BackgroundTransparency = 1
+    TitleLabel.Text = "吃吃多功能已更新-----3.4版本"
+    TitleLabel.TextColor3 = Color3.new(1,1,1)
+    TitleLabel.TextSize = 18
+    TitleLabel.Font = Enum.Font.SourceSansBold
+    TitleLabel.Parent = TitleBar
+
+    -- 右上角关闭按钮
+    local CloseBtn = Instance.new("TextButton")
+    CloseBtn.Size = UDim2.new(0, 30, 0, 30)
+    CloseBtn.Position = UDim2.new(1, -30, 0, 0)
+    CloseBtn.BackgroundTransparency = 1
+    CloseBtn.Text = "X"
+    CloseBtn.TextColor3 = Color3.new(1,1,1)
+    CloseBtn.TextSize = 18
+    CloseBtn.Font = Enum.Font.SourceSansBold
+    CloseBtn.Parent = TitleBar
+    CloseBtn.MouseButton1Click:Connect(function()
+        ScreenGui:Destroy()
+    end)
+
+    local ContentLabel = Instance.new("TextLabel")
+    ContentLabel.Size = UDim2.new(1, -20, 1, -40)
+    ContentLabel.Position = UDim2.new(0, 10, 0, 35)
+    ContentLabel.BackgroundTransparency = 1
+    ContentLabel.TextColor3 = Color3.new(1,1,1)
+    ContentLabel.TextSize = 14
+    ContentLabel.Font = Enum.Font.SourceSans
+    ContentLabel.TextWrapped = true
+    ContentLabel.TextYAlignment = Enum.TextYAlignment.Top
+    ContentLabel.Text = "版本已更新 请关注内部群或者主群：1075988910"
+    ContentLabel.Parent = MainFrame
+end
+MainScript()
