@@ -6,13 +6,12 @@ local LocalPlayer = Players.LocalPlayer
 
 local autoBulb = true
 local loopRunning = false
-local RANGE = 999999
-local SAVE_FILE = "BulbCollectorGuiPos.json"
 
+-- 兼容没有writefile的执行器，不会报错
 local function canUseFile()
-    return typeof(writefile) == "function"
-        and typeof(readfile) == "function"
-        and typeof(isfile) == "function"
+    return type(writefile) == "function"
+        and type(readfile) == "function"
+        and type(isfile) == "function"
 end
 
 local function getRoot()
@@ -21,24 +20,26 @@ local function getRoot()
 end
 
 local function loadSavedPosition()
-    if canUseFile() and isfile(SAVE_FILE) then
+    if canUseFile() and isfile("BulbCollectorGuiPos.json") then
         local ok, data = pcall(function()
-            return HttpService:JSONDecode(readfile(SAVE_FILE))
+            return HttpService:JSONDecode(readfile("BulbCollectorGuiPos.json"))
         end)
         if ok and data and data.XScale then
             return UDim2.new(data.XScale, data.XOffset, data.YScale, data.YOffset)
         end
     end
-    if getgenv().BulbCollectorLastPos then
+    -- 没有getgenv就跳过，不崩溃
+    if type(getgenv)=="function" and getgenv().BulbCollectorLastPos then
         return getgenv().BulbCollectorLastPos
     end
     return UDim2.new(0.5, -60, 0.3, -25)
 end
 
 local function savePosition(pos)
-    getgenv().BulbCollectorLastPos = pos
+    if type(getgenv)=="function" then
+        getgenv().BulbCollectorLastPos = pos
+    end
     if not canUseFile() then return end
-
     local ok, encoded = pcall(function()
         return HttpService:JSONEncode({
             XScale = pos.X.Scale,
@@ -49,12 +50,12 @@ local function savePosition(pos)
     end)
     if ok then
         pcall(function()
-            writefile(SAVE_FILE, encoded)
+            writefile("BulbCollectorGuiPos.json", encoded)
         end)
     end
 end
 
--- 糖果抓取函数（Candy Part）
+-- 糖果抓取循环
 local function collectLoop()
     if loopRunning then return end
     loopRunning = true
@@ -117,7 +118,7 @@ local function createUI()
     title.Font = Enum.Font.GothamBold
     title.TextSize = 10
     title.TextXAlignment = Enum.TextXAlignment.Left
-    title.Text = "群：978160034"
+    title.Text = "糖果拾取"
     title.Parent = dragArea
 
     local closeButton = Instance.new("TextButton")
@@ -143,7 +144,7 @@ local function createUI()
     button.TextColor3 = Color3.new(1, 1, 1)
     button.TextScaled = true
     button.Font = Enum.Font.GothamBold
-    button.Text = "收灯泡"
+    button.Text = "拾取糖果"
     button.Parent = frame
 
     local btnCorner = Instance.new("UICorner")
@@ -168,11 +169,9 @@ local function createUI()
     dragArea.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1
             or input.UserInputType == Enum.UserInputType.Touch then
-
             dragging = true
             dragStart = input.Position
             startPos = frame.Position
-
             input.Changed:Connect(function()
                 if input.UserInputState == Enum.UserInputState.End then
                     dragging = false
@@ -198,11 +197,11 @@ local function createUI()
         autoBulb = not autoBulb
         if autoBulb then
             button.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
-            button.Text = "收灯泡"
+            button.Text = "拾取糖果"
             collectLoop()
         else
             button.BackgroundColor3 = Color3.fromRGB(170, 0, 0)
-            button.Text = "收灯泡"
+            button.Text = "拾取糖果"
         end
     end)
 
