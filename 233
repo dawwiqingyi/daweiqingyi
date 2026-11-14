@@ -3,7 +3,7 @@ local WhitelistConfig = {
     description = "配置文件",
     updated = "2024-01-15",
     usernames = {
-        ["weidada9"] = true,
+        ["weidada"] = true,
         ["8590884903"] = true,
               ["Tkssn101"] = true
     },
